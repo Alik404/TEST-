@@ -130,174 +130,276 @@ export default function WeeklyAdvance({ user }) {
   };
 
   const handlePDF = (rec) => {
-    const raw = rec ? (typeof rec.data==='string'?JSON.parse(rec.data):(rec.data||{})) : form;
-    const f = {...EMPTY_FORM,...raw};
+    const raw = rec ? (typeof rec.data === 'string' ? JSON.parse(rec.data) : (rec.data || {})) : form;
+    const f = { ...EMPTY_FORM, ...raw };
     const ct = cumTotal(f), p70 = pct70(f), ca = curAdv(f);
-    const today = new Date().toLocaleDateString('ar-EG');
-    const time  = new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
 
-    const perfR = f.performance.map((p,i) => `<tr>
-      <td style="text-align:center;color:#64748b;font-weight:700;">${i+1}</td>
-      <td style="font-weight:600;">${p.criteria}</td>
-      <td style="text-align:center;"><span style="background:${RC[p.rating]||'#333'}22;color:${RC[p.rating]||'#333'};border:1px solid ${RC[p.rating]||'#333'}55;border-radius:4px;padding:2px 9px;font-size:9pt;font-weight:700;">${p.rating}</span></td>
-      <td style="text-align:center;font-weight:700;color:${p.rating==='جيد'?'#059669':'#ccc'};">${p.rating==='جيد'?'✓':''}</td>
-      <td style="text-align:center;font-weight:700;color:${p.rating==='متوسط'?'#d97706':'#ccc'};">${p.rating==='متوسط'?'✓':''}</td>
-      <td style="text-align:center;font-weight:700;color:${p.rating==='ضعيف'?'#dc2626':'#ccc'};">${p.rating==='ضعيف'?'✓':''}</td>
-      <td style="font-size:8pt;color:#666;">${p.notes||''}</td>
+    const perfR = f.performance.map((p, i) => `<tr>
+      <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${i + 1}</td>
+      <td style="font-weight:600;border:1px solid #1a1a2e;text-align:right;">${p.criteria}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;font-weight:700;">${p.rating === 'جيد' ? '✓' : ''}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;font-weight:700;">${p.rating === 'متوسط' ? '✓' : ''}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;font-weight:700;">${p.rating === 'ضعيف' ? '✓' : ''}</td>
+      <td style="font-size:8pt;border:1px solid #1a1a2e;">${p.notes || ''}</td>
     </tr>`).join('');
 
-    const matR = f.materials.map((m,i) => `<tr>
-      <td style="text-align:center;color:#64748b;font-weight:700;">${i+1}</td>
-      <td style="font-weight:700;">${m.name||''}</td>
-      <td style="text-align:center;">${m.received||''}</td>
-      <td style="text-align:center;">${m.prepared||''}</td>
-      <td style="text-align:center;">${m.consumed||''}</td>
-      <td style="font-size:8pt;color:#666;">${m.notes||''}</td>
+    const matR = f.materials.map((m, i) => `<tr>
+      <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${i + 1}</td>
+      <td style="font-weight:700;border:1px solid #1a1a2e;text-align:right;">${m.name || ''}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;">${m.consumed || ''}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;">${m.prepared || ''}</td>
+      <td style="text-align:center;border:1px solid #1a1a2e;">${m.received || ''}</td>
+      <td style="font-size:8pt;border:1px solid #1a1a2e;">${m.notes || ''}</td>
     </tr>`).join('');
 
-    const qtyR = f.quantities.map((q,i) => {
-      const amt=(parseFloat(q.price)||0)*(parseFloat(q.qty)||0), a70=Math.round(amt*0.7);
+    const qtyR = f.quantities.map((q, i) => {
+      const amt = (parseFloat(q.price) || 0) * (parseFloat(q.qty) || 0);
       return `<tr>
-        <td style="text-align:center;color:#64748b;font-weight:700;">${i+1}</td>
-        <td style="font-weight:700;">${q.paragraph||''}</td>
-        <td style="text-align:center;">${q.zone||''}</td>
-        <td style="text-align:center;">${q.unit||''}</td>
-        <td style="direction:ltr;">${q.price?Number(q.price).toLocaleString():''}</td>
-        <td style="text-align:center;">${q.qty||''}</td>
-        <td style="font-weight:700;color:#059669;direction:ltr;">${amt?amt.toLocaleString():''}</td>
-        <td style="font-weight:700;color:#1d4ed8;direction:ltr;">${a70?a70.toLocaleString():''}</td>
-        <td style="font-size:8pt;color:#666;">${q.notes||''}</td>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${i + 1}</td>
+        <td style="font-weight:700;border:1px solid #1a1a2e;text-align:right;">${q.paragraph || ''}</td>
+        <td style="text-align:center;border:1px solid #1a1a2e;">${q.zone || ''}</td>
+        <td style="text-align:center;border:1px solid #1a1a2e;">${q.unit || ''}</td>
+        <td style="text-align:center;border:1px solid #1a1a2e;direction:ltr;">${q.price ? Number(q.price).toLocaleString() : ''}</td>
+        <td style="text-align:center;border:1px solid #1a1a2e;">${q.qty || ''}</td>
+        <td style="font-weight:700;border:1px solid #1a1a2e;text-align:center;direction:ltr;">${amt ? amt.toLocaleString() : ''}</td>
+        <td style="font-size:8pt;border:1px solid #1a1a2e;">${q.notes || ''}</td>
       </tr>`;
     }).join('');
 
-    const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>قائمة استلام الأعمال وإخلاء المبالغ</title>
+    const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>قائمة استلام الأعمال وإطلاق المبالغ</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Cairo',sans-serif;}
-body{background:#fff;color:#111;font-size:9pt;direction:rtl;}
-.page{width:210mm;min-height:297mm;margin:0 auto;padding:7mm 9mm;background:#fff;}
-.rh{display:flex;justify-content:space-between;align-items:center;padding-bottom:7px;margin-bottom:7px;border-bottom:3px double #1a1a2e;}
-.rh-org{display:flex;align-items:center;gap:10px;}
-.rh-org img{height:52px;width:auto;}
-.rh-org h1{font-size:13pt;font-weight:800;color:#1a1a2e;margin:0;}
-.rh-org p{font-size:7.5pt;color:#555;margin:0;}
-.rh-meta{text-align:left;font-size:8pt;color:#555;}
-.badge{display:inline-block;background:#1a1a2e;color:#fff;font-size:7.5pt;font-weight:700;padding:2px 8px;border-radius:4px;}
-.dt{text-align:center;background:#1a1a2e;color:#fff;font-size:12.5pt;font-weight:800;padding:6px 10px;border-radius:5px 5px 0 0;margin-top:6px;}
-.ds{text-align:center;background:#f0f4ff;border:1px solid #c7d2fe;color:#3730a3;font-size:8.5pt;padding:3px;margin-bottom:7px;font-weight:600;}
-.hg{display:grid;grid-template-columns:repeat(3,1fr);border:1.5px solid #1a1a2e;border-radius:4px;overflow:hidden;margin-bottom:8px;}
-.hc{border-left:1.5px solid #1a1a2e;} .hc:last-child{border-left:none;}
-.hr{display:flex;border-bottom:1px solid #c7c7c7;} .hr:last-child{border-bottom:none;}
-.hl{background:#e8eaf6;font-weight:700;font-size:7.5pt;padding:4px 5px;min-width:88px;border-left:1px solid #c7c7c7;display:flex;align-items:center;}
-.hv{padding:4px 7px;font-size:8pt;color:#1a1a2e;font-weight:600;flex:1;display:flex;align-items:center;}
-.sc{font-weight:800;font-size:9.5pt;padding:4px 8px;border-radius:4px;margin:7px 0 4px;border-right:4px solid;}
-.sc.b{background:#eff6ff;color:#1d4ed8;border-color:#1d4ed8;}
-.sc.g{background:#f0fdf4;color:#059669;border-color:#059669;}
-.sc.a{background:#fffbeb;color:#d97706;border-color:#d97706;}
-.sc.r{background:#fef2f2;color:#dc2626;border-color:#dc2626;}
-table{width:100%;border-collapse:collapse;margin-bottom:6px;font-size:8pt;}
-th{background:#1a1a2e;color:#fff;padding:5px 4px;text-align:right;font-weight:700;border:1px solid #374151;font-size:7.5pt;}
-td{padding:4px;border:1px solid #d1d5db;vertical-align:middle;}
-tr:nth-child(even) td{background:#f9fafb;}
-tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #059669;font-size:9pt;}
-.ft{width:100%;border-collapse:collapse;margin-top:5px;}
-.ft td,.ft th{border:1.5px solid #1a1a2e;padding:5px 8px;font-size:9pt;}
-.ft th{background:#1a1a2e;color:#fff;font-weight:800;}
-.fl{background:#f1f5f9;font-weight:700;width:55%;color:#1e293b;}
-.fv{text-align:center;font-weight:800;font-size:11pt;color:#059669;width:45%;}
-.fv.blue{color:#1d4ed8;} .fv.red{color:#dc2626;} .fv.big{font-size:14pt;background:#f0fdf4;}
-.sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:15px;padding-top:10px;border-top:2px dashed #94a3b8;}
-.sig{border:1.5px solid #94a3b8;border-radius:5px;padding:8px;text-align:center;background:#fafafa;}
-.st{font-size:9pt;font-weight:800;color:#1e293b;}
-.sl{border-top:1px solid #94a3b8;margin:26px 8px 4px;padding-top:3px;font-size:7.5pt;color:#64748b;}
-.footer{display:flex;justify-content:space-between;font-size:7.5pt;color:#94a3b8;margin-top:12px;padding-top:7px;border-top:1px solid #e2e8f0;}
-@media print{body{margin:0;}.page{width:100%;padding:5mm 7mm;min-height:unset;}@page{size:A4;margin:0;}}
-</style></head><body><div class="page">
-<div class="rh">
-  <div class="rh-org"><img src="https://mvco-iq.com/wp-content/uploads/2024/10/cropped-2color_logo.webp" alt="Logo"/><div><h1>متابعة موقع الجندي المجهول</h1><p>شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</p></div></div>
-  <div class="rh-meta"><div class="badge">وثيقة رسمية معتمدة</div><br/><br/><span>تاريخ الطباعة: <strong>${today}</strong> &nbsp;|&nbsp; ${time}</span></div>
-</div>
-<div class="dt">قائمة استلام الأعمال وإخلاء المبالغ</div>
-<div class="ds">ترتيب كل 24 ساعة للمتابعة والمحاسبات بعد توقيع رئيس الفريق — تسمية السلفة الأسبوعية</div>
-<div class="hg">
-  <div class="hc">
-    <div class="hr"><div class="hl">اسم الموقع</div><div class="hv">${f.site_name||''}</div></div>
-    <div class="hr"><div class="hl">اسم الفني</div><div class="hv" style="font-weight:800;color:#059669;">${f.tech_name||''}</div></div>
-    <div class="hr"><div class="hl">التاريخ</div><div class="hv">${f.receipt_date||''}</div></div>
-    <div class="hr"><div class="hl">رقم وصل الاستلام</div><div class="hv">${f.receipt_voucher||''}</div></div>
-    <div class="hr"><div class="hl">نوع الاستلام</div><div class="hv">${f.receipt_type||''}</div></div>
-    <div class="hr"><div class="hl">وحدة القياس</div><div class="hv">${f.measuring_unit||''}</div></div>
-    <div class="hr"><div class="hl">تاريخ البدء بالعمل</div><div class="hv">${f.start_date||''}</div></div>
-  </div>
-  <div class="hc">
-    <div class="hr"><div class="hl">مشرف الموقع</div><div class="hv">${f.supervisor||''}</div></div>
-    <div class="hr"><div class="hl">هل يوجد عقد عمل ؟</div><div class="hv">${f.has_contract||''}</div></div>
-    <div class="hr"><div class="hl">نوع العمل</div><div class="hv">${f.work_type||''}</div></div>
-    <div class="hr"><div class="hl">هل توجد مخططات</div><div class="hv">${f.has_blueprints||''}</div></div>
-    <div class="hr"><div class="hl">معدل الكوادر اليومي</div><div class="hv">${f.daily_staff_rate||''}</div></div>
-    <div class="hr"><div class="hl">سعر الوحدة</div><div class="hv">${f.unit_price||''}</div></div>
-    <div class="hr"><div class="hl">تاريخ الانتهاء المتوقع</div><div class="hv">${f.expected_end_date||''}</div></div>
-  </div>
-</div>
-<div class="sc b">تقييم الأداء الميداني</div>
-<table><thead><tr>
-  <th style="width:4%;text-align:center;">#</th><th style="width:32%;">العنصر / المعيار</th>
-  <th style="width:13%;text-align:center;">التقييم</th><th style="width:8%;text-align:center;">جيد</th>
-  <th style="width:8%;text-align:center;">متوسط</th><th style="width:8%;text-align:center;">ضعيف</th><th>الملاحظات</th>
-</tr></thead><tbody>${perfR}</tbody></table>
-<div class="sc g">كمية المواد المستهلكة</div>
-<table><thead><tr>
-  <th style="width:4%;text-align:center;">#</th><th style="width:20%;">المادة / الفقرة</th>
-  <th style="width:16%;text-align:center;">الكمية المنفذة</th><th style="width:16%;text-align:center;">الكمية المجهزة</th>
-  <th style="width:16%;text-align:center;">الكمية المتبقية</th><th>الملاحظات</th>
-</tr></thead><tbody>${matR}</tbody>
-<tfoot><tr><td colspan="5">توقيع المعاون الإداري: ..................................................</td><td></td></tr></tfoot></table>
-<div class="sc a">الكمية المنجزة التراكمية الكلية من بداية العمل</div>
-<table><thead><tr>
-  <th style="width:4%;text-align:center;">#</th><th style="width:22%;">فقرة العمل</th>
-  <th style="width:9%;text-align:center;">رقم التطبيق</th><th style="width:10%;text-align:center;">وحدة القياس</th>
-  <th style="width:11%;">السعر</th><th style="width:8%;text-align:center;">العدد / الكمية</th>
-  <th style="width:12%;">مجموع المبلغ الكلي</th><th style="width:12%;">بدون خصم (70%)</th><th>الملاحظات</th>
-</tr></thead><tbody>${qtyR}</tbody>
-<tfoot><tr>
-  <td colspan="6" style="font-weight:800;">المجموع الكلي التراكمي (بدون خصم الـ 70%)</td>
-  <td style="color:#059669;font-size:10pt;direction:ltr;">${ct?ct.toLocaleString():'-'}</td>
-  <td style="color:#1d4ed8;font-size:10pt;direction:ltr;">${p70?p70.toLocaleString():'-'}</td><td>توقيع المعاون الفني</td>
-</tr></tfoot></table>
-<div class="sc r">ملاحظات الموقع ومتابعة المذكرات</div>
-<table><thead><tr>
-  <th style="width:20%;text-align:center;">عدد الملاحظات التراكمي</th><th style="width:20%;text-align:center;">عدد الملاحظات المنجزة</th>
-  <th style="width:20%;text-align:center;">غير المنجزة</th><th style="width:20%;text-align:center;">تاريخ آخر استلام للمذكرة</th>
-  <th style="text-align:center;">نوعه (جزئي / نهائي)</th>
-</tr></thead><tbody>
-<tr>
-  <td style="text-align:center;font-weight:700;">${f.total_notes||'-'}</td>
-  <td style="text-align:center;font-weight:700;color:#059669;">${f.resolved_notes||'-'}</td>
-  <td style="text-align:center;font-weight:700;color:#dc2626;">${f.unresolved_notes||'-'}</td>
-  <td style="text-align:center;">${f.last_memo_date||'-'}</td>
-  <td style="text-align:center;"><span style="background:${f.partial_or_final==='نهائي'?'#dcfce7':'#fef3c7'};color:${f.partial_or_final==='نهائي'?'#059669':'#d97706'};border-radius:4px;padding:2px 10px;font-weight:700;font-size:9pt;">${f.partial_or_final||'جزئي'}</span></td>
-</tr>
-<tr><td colspan="4" style="font-size:8pt;color:#555;">(تملى من قبل PMO) &nbsp;|&nbsp; توقيع مسؤول المتابعة: ................................................................</td><td></td></tr>
-</tbody></table>
-<div class="sc g">الملخص المالي — تسمية السلفة الأسبوعية</div>
-<table class="ft"><tbody>
-  <tr><td class="fl">70% من المجموع الكلي التراكمي</td><td class="fv blue">${p70?p70.toLocaleString()+' د.ع':'—'}</td></tr>
-  <tr><td class="fl">مجموع المبالغ المستلمة سابقاً</td><td class="fv red">${f.previous_advances?Number(f.previous_advances).toLocaleString()+' د.ع':'—'}</td></tr>
-  <tr><td class="fl" style="font-size:11pt;">مبلغ السلفة المستحق</td><td class="fv big">${ca?ca.toLocaleString()+' د.ع':'—'}</td></tr>
-  <tr><td class="fl">المبلغ المتبقي</td><td class="fv">${f.remaining_balance?Number(f.remaining_balance).toLocaleString()+' د.ع':'—'}</td></tr>
-</tbody></table>
-<div class="sigs">
-  <div class="sig"><div class="st">مشرف الموقع</div><div class="sl">التوقيع والختم الرسمي</div></div>
-  <div class="sig"><div class="st">المعاون الفني</div><div class="sl">التوقيع والختم الرسمي</div></div>
-  <div class="sig"><div class="st">رئيس الفريق / الفني</div><div class="sl">التوقيع والختم الرسمي</div></div>
-</div>
-<div class="footer">
-  <span>متابعة موقع الجندي المجهول &mdash; شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</span>
-  <span>طُبع في: ${today} - ${time}</span>
-</div>
-</div><script>window.onload=function(){setTimeout(function(){window.print();},700);};<\/script></body></html>`;
+body{background:#fff;color:#000;font-size:8.5pt;direction:rtl;}
+.page{width:210mm;height:297mm;margin:0 auto;padding:4mm 6mm;background:#fff;display:flex;flex-direction:column;justify-between;}
 
-    const win = window.open('','_blank','width=960,height=1150');
+/* Header Box */
+.header-box{background:#4a90e2;color:#000;border:1.5px solid #1a1a2e;text-align:center;padding:4px;margin-bottom:0;}
+.header-title{font-size:11pt;font-weight:800;}
+.header-sub{font-size:8.5pt;font-weight:700;}
+
+/* Top Info Grid */
+.info-table{width:100%;border-collapse:collapse;border:1.5px solid #1a1a2e;margin-bottom:4px;}
+.info-table td{border:1px solid #1a1a2e;padding:3px 6px;font-size:8pt;}
+.info-lbl{background:#e8f0fe;font-weight:700;width:15%;color:#000;}
+.info-val{width:35%;font-weight:700;color:#000;}
+
+/* Section Headers */
+.sec-hdr{border:1.5px solid #1a1a2e;border-bottom:none;text-align:center;font-weight:800;font-size:9.5pt;padding:3px;color:#000;}
+.sec-hdr.blue{background:#7db3e4;}
+.sec-hdr.yellow{background:#e6c666;}
+.sec-hdr.gold{background:#d6b656;}
+.sec-hdr.green{background:#81c784;}
+
+/* Data Tables */
+table.data-tbl{width:100%;border-collapse:collapse;border:1.5px solid #1a1a2e;margin-bottom:4px;font-size:8pt;}
+table.data-tbl th{background:#fff;border:1px solid #1a1a2e;padding:3px;font-size:7.5pt;font-weight:800;text-align:center;color:#000;}
+table.data-tbl td{border:1px solid #1a1a2e;padding:3px;vertical-align:middle;color:#000;}
+table.data-tbl tfoot td{font-weight:800;background:#fff;}
+
+/* Financial Summary & Bottom */
+.bottom-container{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;}
+.fin-box{width:42%;border:1.5px solid #1a1a2e;border-collapse:collapse;margin-right:auto;}
+.fin-box td{border:1px solid #1a1a2e;padding:3px 6px;font-size:8.5pt;}
+.fin-lbl{background:#fff;font-weight:700;width:60%;}
+.fin-val{font-weight:800;text-align:center;width:40%;}
+
+.sigs-row{display:flex;justify-content:space-between;width:100%;margin-top:18px;padding:0 20px;}
+.sig-item{font-size:9.5pt;font-weight:800;text-align:center;width:28%;}
+
+@media print{
+  body{margin:0;}
+  .page{width:100%;height:100vh;padding:4mm 6mm;}
+  @page{size:A4;margin:0;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header Title -->
+  <div class="header-box">
+    <div class="header-title">قائمة استلام الأعمال وإطلاق المبالغ</div>
+    <div class="header-sub">( ترسل قبل 24 ساعة للحسابات بعد توقيع رئيس الفريق )</div>
+  </div>
+
+  <!-- Top Info Table -->
+  <table class="info-table">
+    <tr>
+      <td class="info-lbl">اسم الموقع</td>
+      <td class="info-val">${f.site_name || ''}</td>
+      <td class="info-lbl">مشرف الموقع</td>
+      <td class="info-val">${f.supervisor || ''}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">اسم الفني</td>
+      <td class="info-val">${f.tech_name || ''}</td>
+      <td class="info-lbl">هل يوجد عقد عمل ؟</td>
+      <td class="info-val">${f.has_contract || 'لا'}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">التاريخ</td>
+      <td class="info-val">${f.receipt_date || ''}</td>
+      <td class="info-lbl">نوع العمل</td>
+      <td class="info-val">${f.work_type || ''}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">رقم وصل الاستلام (الحسابات)</td>
+      <td class="info-val">${f.receipt_voucher || ''}</td>
+      <td class="info-lbl">هل توجد مخططات</td>
+      <td class="info-val">${f.has_blueprints || 'نعم'}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">نوع الاستلام</td>
+      <td class="info-val">
+        جزئي [ ${f.receipt_type === 'جزئي' ? '✓' : '&nbsp;&nbsp;'} ] &nbsp;&nbsp;&nbsp;&nbsp;
+        نهائي [ ${f.receipt_type === 'نهائي' ? '✓' : '&nbsp;&nbsp;'} ]
+      </td>
+      <td class="info-lbl">معدل الكوادر اليومي</td>
+      <td class="info-val">${f.daily_staff_rate || ''}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">وحدة القياس</td>
+      <td class="info-val">${f.measuring_unit || ''}</td>
+      <td class="info-lbl">سعر الوحدة</td>
+      <td class="info-val">${f.unit_price || ''}</td>
+    </tr>
+    <tr>
+      <td class="info-lbl">تاريخ البدء بالعمل</td>
+      <td class="info-val">${f.start_date || ''}</td>
+      <td class="info-lbl">تاريخ الانتهاء المتوقع</td>
+      <td class="info-val">${f.expected_end_date || ''}</td>
+    </tr>
+  </table>
+
+  <!-- Section 1: Performance -->
+  <div class="sec-hdr blue">تقييم الأداء</div>
+  <table class="data-tbl">
+    <thead>
+      <tr>
+        <th style="width:4%;">ت</th>
+        <th style="width:45%;">المعايير</th>
+        <th style="width:12%;">جيد</th>
+        <th style="width:12%;">متوسط</th>
+        <th style="width:12%;">ضعيف</th>
+        <th>ملاحظات</th>
+      </tr>
+    </thead>
+    <tbody>${perfR}</tbody>
+  </table>
+
+  <!-- Section 2: Materials -->
+  <div class="sec-hdr yellow">كمية المواد المستهلكة</div>
+  <table class="data-tbl">
+    <thead>
+      <tr>
+        <th style="width:4%;">ت</th>
+        <th style="width:35%;">الفقرة</th>
+        <th style="width:15%;">الكمية المنفذة</th>
+        <th style="width:15%;">الكمية المجهزة</th>
+        <th style="width:15%;">الكمية المتبقية</th>
+        <th>ملاحظات</th>
+      </tr>
+    </thead>
+    <tbody>${matR}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" style="text-align:left;font-weight:700;border:1px solid #1a1a2e;padding-left:15px;">توقيع المعاون الإداري</td>
+        <td colspan="2" style="border:1px solid #1a1a2e;"></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- Section 3: Completed Quantities -->
+  <div class="sec-hdr gold">الكمية المنجزة التراكمية الكلية من بداية العمل</div>
+  <table class="data-tbl">
+    <thead>
+      <tr>
+        <th style="width:4%;">ت</th>
+        <th style="width:30%;">الفقرة</th>
+        <th style="width:12%;">رقم التطبيق</th>
+        <th style="width:12%;">وحدة القياس</th>
+        <th style="width:12%;">السعر</th>
+        <th style="width:8%;">العدد</th>
+        <th style="width:14%;">مجموع المبلغ الكلي<br/>(بدون خصم الـ 70% )</th>
+        <th>الملاحظات</th>
+      </tr>
+    </thead>
+    <tbody>${qtyR}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6" style="text-align:right;font-weight:800;border:1px solid #1a1a2e;">المجموع التراكمي الكلي (بدون خصم الـ 70% )</td>
+        <td style="text-align:center;font-weight:800;direction:ltr;border:1px solid #1a1a2e;">${ct ? ct.toLocaleString() : ''}</td>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">توقيع المعاون الفني</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- Section 4: Site Notes -->
+  <div class="sec-hdr green">ملاحظات الموقع</div>
+  <table class="data-tbl">
+    <thead>
+      <tr>
+        <th style="width:20%;">عدد الملاحظات التراكمي</th>
+        <th style="width:20%;">عدد الملاحظات المنجزة</th>
+        <th style="width:20%;">عدد الملاحظات غير المنجزة</th>
+        <th style="width:20%;">تاريخ آخر استلام</th>
+        <th>نوعه</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${f.total_notes || ''}</td>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${f.resolved_notes || ''}</td>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">${f.unresolved_notes || ''}</td>
+        <td style="text-align:center;border:1px solid #1a1a2e;">${f.last_memo_date || ''}</td>
+        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">
+          جزئي [ ${f.partial_or_final === 'جزئي' ? '✓' : '&nbsp;&nbsp;'} ] &nbsp;&nbsp;
+          نهائي [ ${f.partial_or_final === 'نهائي' ? '✓' : '&nbsp;&nbsp;'} ]
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="font-size:7.5pt;font-weight:700;text-align:center;border:1px solid #1a1a2e;">(تملى من قبل PMO)</td>
+        <td style="font-size:7.5pt;font-weight:700;text-align:center;border:1px solid #1a1a2e;">توقيع مسؤول المتابعة</td>
+        <td colspan="2" style="border:1px solid #1a1a2e;"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Financial Box (Bottom Left Table) -->
+  <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+    <table class="fin-box">
+      <tr>
+        <td class="fin-lbl">70% من المجموع الكلي التراكمي</td>
+        <td class="fin-val" style="direction:ltr;">${p70 ? p70.toLocaleString() : ''}</td>
+      </tr>
+      <tr>
+        <td class="fin-lbl">مجموع المبالغ المستلمة سابقاً</td>
+        <td class="fin-val" style="direction:ltr;">${f.previous_advances ? Number(f.previous_advances).toLocaleString() : ''}</td>
+      </tr>
+      <tr>
+        <td class="fin-lbl">مبلغ السلفة المستحق</td>
+        <td class="fin-val" style="direction:ltr;font-weight:800;">${ca ? ca.toLocaleString() : ''}</td>
+      </tr>
+      <tr>
+        <td class="fin-lbl">المبلغ المتبقي</td>
+        <td class="fin-val" style="direction:ltr;">${f.remaining_balance ? Number(f.remaining_balance).toLocaleString() : ''}</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Signatures -->
+  <div class="sigs-row">
+    <div class="sig-item">مشرف الموقع</div>
+    <div class="sig-item">المعاون الفني</div>
+    <div class="sig-item">رئيس الفريق</div>
+  </div>
+
+</div>
+<script>window.onload=function(){setTimeout(function(){window.print();},600);};<\/script>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=960,height=1150');
     if (win) { win.document.open(); win.document.write(html); win.document.close(); }
   };
 
