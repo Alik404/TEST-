@@ -131,7 +131,7 @@ const dictionary = {
     materialsReportEndTime: "وقت الانتهاء",
     materialsReportPreparedBy: "معد التقرير",
     materialsReportNotes: "ملاحظات إضافية حول سير العمل أو نقص المواد",
-    sectionBasics: "القسم الأول: الماربلتكس والمواد الأساسية",
+    sectionBasics: "القسم الأول: الماربلكس والمواد الأساسية",
     sectionMarble: "القسم الثاني: جرد المرمر",
     sectionSealants: "القسم الثالث: جرد الصوصج والمواد العازلة",
     sectionBulk: "القسم الرابع: جرد المواد السائبة",

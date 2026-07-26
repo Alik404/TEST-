@@ -174,6 +174,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       putty: 'معجون', primer: 'برايمر', roller: 'رولة'
     };
     Object.entries(report.basics || {}).forEach(([key, item]) => {
+      if (key === 'notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
       basicsRows += `<tr><td>${basicsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
     });
 
@@ -239,11 +240,12 @@ export default function MaterialsConsumption({ user, t, lang }) {
       sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
     };
     Object.entries(report.sealants || {}).forEach(([key, item]) => {
+      if (key === 'notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
       sealantsRows += `<tr><td>${sealantsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
     });
 
     // Section titles and filters
-    const docTitle = targetSection === 'basics' ? 'جرد الماربلتكس والمواد الأساسية'
+    const docTitle = targetSection === 'basics' ? 'جرد الماربلكس والمواد الأساسية'
       : targetSection === 'marble' ? 'جرد ورصيد المرمر'
       : targetSection === 'sealants' ? 'جرد المواد العازلة والصوصج'
       : targetSection === 'bulk' ? 'جرد المواد السائبة والإسفنج'
@@ -370,7 +372,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
 
     ${showBasics ? `
     <div class="section">
-      <div class="section-title"><span class="num">1</span> الماربلتكس والمواد الأساسية</div>
+      <div class="section-title"><span class="num">1</span> الماربلكس والمواد الأساسية</div>
       <table>
         <thead><tr><th style="width:50%">المادة</th><th style="width:25%;text-align:center">الكمية المسحوبة</th><th style="width:25%;text-align:center">الكمية المتبقية</th></tr></thead>
         <tbody>${basicsRows || '<tr><td colspan="3" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
@@ -409,7 +411,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       ${report.bulk_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد السائبة</div><p>${report.bulk_notes}</p></div>` : ''}
     </div>` : ''}
 
-    ${report.notes ? `
+    ${(!targetSection && report.notes) ? `
     <div class="notes-box" style="border-color:#1a1a2e;background:#f8f9fa;">
       <div class="section-label" style="color:#1a1a2e;">ملاحظات وتحديثات الاستهلاك العامة:</div>
       <p style="font-style:normal;">${report.notes}</p>
