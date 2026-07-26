@@ -73,6 +73,18 @@ export default function MaterialsConsumption({ user, t, lang }) {
   const [expandedReportId, setExpandedReportId] = useState(null);
   const [originalDataForEdit, setOriginalDataForEdit] = useState(null);
 
+  // Helper to ensure section_notes are populated from top-level or embedded JSONB
+  const normalizeReport = (rep) => {
+    if (!rep) return rep;
+    return {
+      ...rep,
+      basics_notes: rep.basics_notes !== undefined ? rep.basics_notes : (rep.basics?.section_notes || rep.basics?.basics_notes || ''),
+      marble_notes: rep.marble_notes !== undefined ? rep.marble_notes : (rep.marble?.section_notes || rep.marble?.marble_notes || ''),
+      sealants_notes: rep.sealants_notes !== undefined ? rep.sealants_notes : (rep.sealants?.section_notes || rep.sealants?.sealants_notes || ''),
+      bulk_notes: rep.bulk_notes !== undefined ? rep.bulk_notes : (rep.bulk?.section_notes || rep.bulk?.bulk_notes || '')
+    };
+  };
+
   // 1. Fetch submitted reports on mount
   const fetchReports = async () => {
     setLoading(true);
@@ -80,7 +92,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       const res = await fetch('/api/materials-consumption');
       if (res.ok) {
         const data = await res.json();
-        setReports(data);
+        setReports(data.map(normalizeReport));
       }
     } catch (err) {
       console.error('Error fetching materials reports:', err);
@@ -105,6 +117,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       putty: 'معجون', primer: 'برايمر', roller: 'رولة'
     };
     Object.keys(report.basics || {}).forEach(k => {
+      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes')) return;
       const oldP = prevReport.basics?.[k]?.pulled || '-';
       const newP = report.basics?.[k]?.pulled || '-';
       const oldR = prevReport.basics?.[k]?.remaining || '-';
@@ -121,6 +134,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
     };
     Object.keys(report.sealants || {}).forEach(k => {
+      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes')) return;
       const oldP = prevReport.sealants?.[k]?.pulled || '-';
       const newP = report.sealants?.[k]?.pulled || '-';
       const oldR = prevReport.sealants?.[k]?.remaining || '-';
@@ -161,7 +175,8 @@ export default function MaterialsConsumption({ user, t, lang }) {
   };
 
   // ── Generate and print PDF report (Supports All sections OR Section-specific) ──
-  const handlePrintReport = (report, targetSection = null) => {
+  const handlePrintReport = (rawReport, targetSection = null) => {
+    const report = normalizeReport(rawReport);
     const dayLabel = report.day || '';
     const zones = ['zone_a', 'zone_b', 'zone_c'];
     const zoneNames = { zone_a: 'زون A', zone_b: 'زون B', zone_c: 'زون C' };
@@ -174,7 +189,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       putty: 'معجون', primer: 'برايمر', roller: 'رولة'
     };
     Object.entries(report.basics || {}).forEach(([key, item]) => {
-      if (key === 'notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
+      if (key === 'notes' || key === 'section_notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
       basicsRows += `<tr><td>${basicsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
     });
 
@@ -240,7 +255,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
     };
     Object.entries(report.sealants || {}).forEach(([key, item]) => {
-      if (key === 'notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
+      if (key === 'notes' || key === 'section_notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
       sealantsRows += `<tr><td>${sealantsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
     });
 
@@ -560,6 +575,19 @@ export default function MaterialsConsumption({ user, t, lang }) {
 
     const submitData = JSON.parse(JSON.stringify(formData));
 
+    // Embed section notes inside JSONB objects so Supabase saves them safely
+    submitData.basics = submitData.basics || {};
+    submitData.basics.section_notes = submitData.basics_notes || '';
+
+    submitData.marble = submitData.marble || {};
+    submitData.marble.section_notes = submitData.marble_notes || '';
+
+    submitData.sealants = submitData.sealants || {};
+    submitData.sealants.section_notes = submitData.sealants_notes || '';
+
+    submitData.bulk = submitData.bulk || {};
+    submitData.bulk.section_notes = submitData.bulk_notes || '';
+
     if (originalDataForEdit) {
       const diffList = getDifferencesList(submitData, originalDataForEdit);
       if (diffList.length > 0) {
@@ -629,8 +657,9 @@ export default function MaterialsConsumption({ user, t, lang }) {
 
   // 7. Edit Setup
   const handleEdit = (report) => {
-    setFormData(report);
-    setOriginalDataForEdit(JSON.parse(JSON.stringify(report)));
+    const norm = normalizeReport(report);
+    setFormData(norm);
+    setOriginalDataForEdit(JSON.parse(JSON.stringify(norm)));
     setIsEditingId(report.id);
     setIsCloned(false);
     setViewMode('form');
@@ -638,18 +667,19 @@ export default function MaterialsConsumption({ user, t, lang }) {
 
   // 8. Clone/Copy Setup
   const handleClone = (report) => {
+    const norm = normalizeReport(report);
     const todayDate = new Date().toISOString().split('T')[0];
     const dayOfWeekIndex = new Date().getDay();
     const todayDayArabic = DAYS_OF_WEEK.ar[dayOfWeekIndex];
 
     setFormData({
-      ...report,
+      ...norm,
       id: undefined, // Clear ID so it saves as new
       date: todayDate,
       day: todayDayArabic,
       created_at: undefined
     });
-    setOriginalDataForEdit(JSON.parse(JSON.stringify(report)));
+    setOriginalDataForEdit(JSON.parse(JSON.stringify(norm)));
     setIsEditingId(null);
     setIsCloned(true);
     setViewMode('form');
