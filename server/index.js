@@ -1023,7 +1023,109 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
+
+// ─── Weekly Advance (تسمية السلفة الأسبوعية) ────────────────────────────────
+
+// GET all
+app.get('/api/weekly-advance', async (req, res) => {
+  try {
+    const { data, error } = await db
+      .from('weekly_advance')
+      .select('*')
+      .order('receipt_date', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Get weekly-advance error:', err);
+    // Fallback to local JSON
+    try {
+      const fp = path.join(__dirname, 'data', 'weekly_advance.json');
+      if (fs.existsSync(fp)) {
+        res.json(JSON.parse(fs.readFileSync(fp, 'utf8')));
+      } else {
+        res.json([]);
+      }
+    } catch { res.json([]); }
+  }
+});
+
+// GET single
+app.get('/api/weekly-advance/:id', async (req, res) => {
+  try {
+    const { data, error } = await db
+      .from('weekly_advance')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(404).json({ error: 'السجل غير موجود.' });
+  }
+});
+
+// POST create
+app.post('/api/weekly-advance', async (req, res) => {
+  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
+  try {
+    const { data, error } = await db
+      .from('weekly_advance')
+      .insert([{ receipt_date, team_leader, site_name, team_number, data: formData }])
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Create weekly-advance error:', err);
+    // Fallback: save to JSON
+    try {
+      const fp = path.join(__dirname, 'data', 'weekly_advance.json');
+      const existing = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf8')) : [];
+      const newRec = { id: Date.now(), receipt_date, team_leader, site_name, team_number, data: formData, created_at: new Date().toISOString() };
+      existing.unshift(newRec);
+      fs.writeFileSync(fp, JSON.stringify(existing, null, 2));
+      res.status(201).json(newRec);
+    } catch (e2) {
+      res.status(500).json({ error: 'فشل الحفظ.' });
+    }
+  }
+});
+
+// PUT update
+app.put('/api/weekly-advance/:id', async (req, res) => {
+  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
+  try {
+    const { data, error } = await db
+      .from('weekly_advance')
+      .update({ receipt_date, team_leader, site_name, team_number, data: formData })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Update weekly-advance error:', err);
+    res.status(500).json({ error: 'فشل التحديث.' });
+  }
+});
+
+// DELETE
+app.delete('/api/weekly-advance/:id', async (req, res) => {
+  try {
+    const { error } = await db
+      .from('weekly_advance')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete weekly-advance error:', err);
+    res.status(500).json({ error: 'فشل الحذف.' });
+  }
+});
+
 // Serve static assets in production
+
 const clientDistPath = path.join(__dirname, '../dist');
 app.use(express.static(clientDistPath));
 

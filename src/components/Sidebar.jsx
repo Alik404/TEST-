@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ClipboardList, Layers,
   LogOut, ChevronLeft, ChevronRight,
-  MessageSquare, FileText, Users, Banknote
+  MessageSquare, FileText, Users, Banknote, Receipt
 } from 'lucide-react';
 import companyLogo from '../assets/company-logo.webp';
 
@@ -23,6 +23,7 @@ export default function Sidebar({
     { id: 'marble',                label: t('menuMarble'),                 icon: Layers          },
     { id: 'materials-consumption', label: t('menuMaterialsConsumption'),   icon: FileText        },
     { id: 'workers-wages',         label: isAr ? 'أجور العمال' : 'Workers Wages', icon: Banknote },
+    { id: 'weekly-advance',        label: isAr ? 'تسمية السلفة' : 'Weekly Advance', icon: Receipt },
     { id: 'daily-updates',        label: isAr ? 'التحديث اليومي' : 'Daily Log', icon: MessageSquare },
   ];
 
