@@ -2,27 +2,35 @@ import React, { useState, useEffect } from 'react';
 import { Plus, FileText, Printer, Eye, Pencil, Trash2, Search, Calendar, ChevronRight } from 'lucide-react';
 
 const EMPTY_FORM = {
+  // Right Column fields
   site_name: 'موقع الجندي المجهول',
-  team_leader: '',
-  supervisor: '',
-  nationality: '',
+  tech_name: '',
   receipt_date: new Date().toISOString().split('T')[0],
-  team_number: 'B',
+  receipt_voucher: '',
+  receipt_type: 'جزئي',
+  measuring_unit: '',
+  start_date: '',
+
+  // Middle Column fields
+  supervisor: '',
+  has_contract: 'لا',
   work_type: '',
-  team_count: '',
-  session_number: '',
-  team_type: 'دائم',
+  has_blueprints: 'نعم',
+  daily_staff_rate: '',
+  unit_price: '',
   expected_end_date: '',
-  prepared_by: '',
+
+  // Section 1: Performance Criteria (9 exact items from the paper)
   performance: [
-    { criteria: 'الالتزام بالتشغيل أثناء وجود العميل',     rating: 'جيد', notes: '' },
-    { criteria: 'الالتزام بالعمل مع المشطفيات',            rating: 'جيد', notes: '' },
-    { criteria: 'المحافظة على الأدوات والطرق الإدارية',    rating: 'جيد', notes: '' },
-    { criteria: 'مراعاة عناصر الخدمة المتكاملة',           rating: 'جيد', notes: '' },
-    { criteria: 'الالتزام بالخدمة المنتهية',               rating: 'جيد', notes: '' },
-    { criteria: 'تقديم التقارير الدورية',                  rating: 'جيد', notes: '' },
-    { criteria: 'وقت نهاية الدوام',                        rating: 'جيد', notes: '' },
-    { criteria: 'نظافة موقع العمل',                        rating: 'جيد', notes: '' },
+    { criteria: 'الالتزام بالتشغيل أثناء وبعد العمل', rating: 'جيد', notes: '' },
+    { criteria: 'الالتزام بالعمل ضمن المخططات',       rating: 'جيد', notes: '' },
+    { criteria: 'المحافظة على المواد المستلمة',       rating: 'جيد', notes: '' },
+    { criteria: 'حالة المخزن',                         rating: 'جيد', notes: '' },
+    { criteria: 'مدى التفاهم بين الفني وفريق الإشراف', rating: 'جيد', notes: '' },
+    { criteria: 'عدد الكوادر مقارنة بحجم العمل',      rating: 'جيد', notes: '' },
+    { criteria: 'الالتزام بشروط السلامة',              rating: 'جيد', notes: '' },
+    { criteria: 'وقت طلب المواد',                      rating: 'جيد', notes: '' },
+    { criteria: 'سرعة سير العمل',                     rating: 'جيد', notes: '' },
   ],
   materials: [
     { name: 'مرمر',  received: '', prepared: '', consumed: '', notes: '' },
@@ -214,20 +222,20 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
 <div class="hg">
   <div class="hc">
     <div class="hr"><div class="hl">اسم الموقع</div><div class="hv">${f.site_name||''}</div></div>
-    <div class="hr"><div class="hl">رئيس الفريق</div><div class="hv" style="font-weight:800;color:#059669;">${f.team_leader||''}</div></div>
+    <div class="hr"><div class="hl">اسم الفني</div><div class="hv" style="font-weight:800;color:#059669;">${f.tech_name||''}</div></div>
+    <div class="hr"><div class="hl">التاريخ</div><div class="hv">${f.receipt_date||''}</div></div>
+    <div class="hr"><div class="hl">رقم وصل الاستلام</div><div class="hv">${f.receipt_voucher||''}</div></div>
+    <div class="hr"><div class="hl">نوع الاستلام</div><div class="hv">${f.receipt_type||''}</div></div>
+    <div class="hr"><div class="hl">وحدة القياس</div><div class="hv">${f.measuring_unit||''}</div></div>
+    <div class="hr"><div class="hl">تاريخ البدء بالعمل</div><div class="hv">${f.start_date||''}</div></div>
+  </div>
+  <div class="hc">
     <div class="hr"><div class="hl">مشرف الموقع</div><div class="hv">${f.supervisor||''}</div></div>
-    <div class="hr"><div class="hl">الجنسية</div><div class="hv">${f.nationality||''}</div></div>
-  </div>
-  <div class="hc">
-    <div class="hr"><div class="hl">تاريخ الاستلام</div><div class="hv" style="font-weight:800;">${f.receipt_date||''}</div></div>
-    <div class="hr"><div class="hl">رقم الفريق</div><div class="hv" style="font-weight:800;color:#1d4ed8;">${f.team_number||''}</div></div>
+    <div class="hr"><div class="hl">هل يوجد عقد عمل ؟</div><div class="hv">${f.has_contract||''}</div></div>
     <div class="hr"><div class="hl">نوع العمل</div><div class="hv">${f.work_type||''}</div></div>
-    <div class="hr"><div class="hl">عدد الفريق</div><div class="hv">${f.team_count||''}</div></div>
-  </div>
-  <div class="hc">
-    <div class="hr"><div class="hl">رقم الجلسة</div><div class="hv">${f.session_number||''}</div></div>
-    <div class="hr"><div class="hl">نوع الفريق</div><div class="hv">${f.team_type||''}</div></div>
-    <div class="hr"><div class="hl">معد التقرير</div><div class="hv">${f.prepared_by||''}</div></div>
+    <div class="hr"><div class="hl">هل توجد مخططات</div><div class="hv">${f.has_blueprints||''}</div></div>
+    <div class="hr"><div class="hl">معدل الكوادر اليومي</div><div class="hv">${f.daily_staff_rate||''}</div></div>
+    <div class="hr"><div class="hl">سعر الوحدة</div><div class="hv">${f.unit_price||''}</div></div>
     <div class="hr"><div class="hl">تاريخ الانتهاء المتوقع</div><div class="hv">${f.expected_end_date||''}</div></div>
   </div>
 </div>
@@ -240,27 +248,27 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
 <div class="sc g">كمية المواد المستهلكة</div>
 <table><thead><tr>
   <th style="width:4%;text-align:center;">#</th><th style="width:20%;">المادة / الفقرة</th>
-  <th style="width:16%;text-align:center;">الكمية المستلمة</th><th style="width:16%;text-align:center;">الكمية المجهزة</th>
-  <th style="width:16%;text-align:center;">الكمية المنتهية</th><th>الملاحظات</th>
+  <th style="width:16%;text-align:center;">الكمية المنفذة</th><th style="width:16%;text-align:center;">الكمية المجهزة</th>
+  <th style="width:16%;text-align:center;">الكمية المتبقية</th><th>الملاحظات</th>
 </tr></thead><tbody>${matR}</tbody>
 <tfoot><tr><td colspan="5">توقيع المعاون الإداري: ..................................................</td><td></td></tr></tfoot></table>
 <div class="sc a">الكمية المنجزة التراكمية الكلية من بداية العمل</div>
 <table><thead><tr>
   <th style="width:4%;text-align:center;">#</th><th style="width:22%;">فقرة العمل</th>
   <th style="width:9%;text-align:center;">رقم التطبيق</th><th style="width:10%;text-align:center;">وحدة القياس</th>
-  <th style="width:11%;">السعر</th><th style="width:8%;text-align:center;">الكمية</th>
+  <th style="width:11%;">السعر</th><th style="width:8%;text-align:center;">العدد / الكمية</th>
   <th style="width:12%;">مجموع المبلغ الكلي</th><th style="width:12%;">بدون خصم (70%)</th><th>الملاحظات</th>
 </tr></thead><tbody>${qtyR}</tbody>
 <tfoot><tr>
-  <td colspan="6" style="font-weight:800;">المجموع الكلي التراكمي</td>
+  <td colspan="6" style="font-weight:800;">المجموع الكلي التراكمي (بدون خصم الـ 70%)</td>
   <td style="color:#059669;font-size:10pt;direction:ltr;">${ct?ct.toLocaleString():'-'}</td>
-  <td style="color:#1d4ed8;font-size:10pt;direction:ltr;">${p70?p70.toLocaleString():'-'}</td><td></td>
+  <td style="color:#1d4ed8;font-size:10pt;direction:ltr;">${p70?p70.toLocaleString():'-'}</td><td>توقيع المعاون الفني</td>
 </tr></tfoot></table>
 <div class="sc r">ملاحظات الموقع ومتابعة المذكرات</div>
 <table><thead><tr>
-  <th style="width:20%;text-align:center;">عدد الملاحظات التراكمي</th><th style="width:20%;text-align:center;">عدد الملاحظات المحلولة</th>
-  <th style="width:20%;text-align:center;">غير المحلولة</th><th style="width:20%;text-align:center;">تاريخ آخر استلام للمذكرة</th>
-  <th style="text-align:center;">نهائي / جزئي</th>
+  <th style="width:20%;text-align:center;">عدد الملاحظات التراكمي</th><th style="width:20%;text-align:center;">عدد الملاحظات المنجزة</th>
+  <th style="width:20%;text-align:center;">غير المنجزة</th><th style="width:20%;text-align:center;">تاريخ آخر استلام للمذكرة</th>
+  <th style="text-align:center;">نوعه (جزئي / نهائي)</th>
 </tr></thead><tbody>
 <tr>
   <td style="text-align:center;font-weight:700;">${f.total_notes||'-'}</td>
@@ -269,19 +277,19 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
   <td style="text-align:center;">${f.last_memo_date||'-'}</td>
   <td style="text-align:center;"><span style="background:${f.partial_or_final==='نهائي'?'#dcfce7':'#fef3c7'};color:${f.partial_or_final==='نهائي'?'#059669':'#d97706'};border-radius:4px;padding:2px 10px;font-weight:700;font-size:9pt;">${f.partial_or_final||'جزئي'}</span></td>
 </tr>
-<tr><td colspan="4" style="font-size:8pt;color:#555;">توقيع مسؤول المتابعة (PMD): ................................................................................</td><td></td></tr>
+<tr><td colspan="4" style="font-size:8pt;color:#555;">(تملى من قبل PMO) &nbsp;|&nbsp; توقيع مسؤول المتابعة: ................................................................</td><td></td></tr>
 </tbody></table>
 <div class="sc g">الملخص المالي — تسمية السلفة الأسبوعية</div>
 <table class="ft"><tbody>
   <tr><td class="fl">70% من المجموع الكلي التراكمي</td><td class="fv blue">${p70?p70.toLocaleString()+' د.ع':'—'}</td></tr>
-  <tr><td class="fl">مجموع المبالغ المقدمة سابقاً</td><td class="fv red">${f.previous_advances?Number(f.previous_advances).toLocaleString()+' د.ع':'—'}</td></tr>
+  <tr><td class="fl">مجموع المبالغ المستلمة سابقاً</td><td class="fv red">${f.previous_advances?Number(f.previous_advances).toLocaleString()+' د.ع':'—'}</td></tr>
   <tr><td class="fl" style="font-size:11pt;">مبلغ السلفة المستحق</td><td class="fv big">${ca?ca.toLocaleString()+' د.ع':'—'}</td></tr>
   <tr><td class="fl">المبلغ المتبقي</td><td class="fv">${f.remaining_balance?Number(f.remaining_balance).toLocaleString()+' د.ع':'—'}</td></tr>
 </tbody></table>
 <div class="sigs">
   <div class="sig"><div class="st">مشرف الموقع</div><div class="sl">التوقيع والختم الرسمي</div></div>
   <div class="sig"><div class="st">المعاون الفني</div><div class="sl">التوقيع والختم الرسمي</div></div>
-  <div class="sig"><div class="st">رئيس الفريق</div><div class="sl">التوقيع والختم الرسمي</div></div>
+  <div class="sig"><div class="st">رئيس الفريق / الفني</div><div class="sl">التوقيع والختم الرسمي</div></div>
 </div>
 <div class="footer">
   <span>متابعة موقع الجندي المجهول &mdash; شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</span>
@@ -293,14 +301,14 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
     if (win) { win.document.open(); win.document.write(html); win.document.close(); }
   };
 
-  const filtered = records.filter(r => !search || (r.team_leader||'').includes(search)||(r.site_name||'').includes(search)||(r.receipt_date||'').includes(search)||(r.team_number||'').includes(search));
+  const filtered = records.filter(r => !search || (r.tech_name||'').includes(search)||(r.site_name||'').includes(search)||(r.receipt_date||'').includes(search)||(r.work_type||'').includes(search));
 
   if (viewMode === 'list') return (
     <div style={{ padding: '1.5rem', maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem', gap:'1rem', flexWrap:'wrap' }}>
         <div>
           <h1 style={{ fontSize:'1.6rem', fontWeight:800, color:'var(--text)', margin:0 }}>📋 تسمية السلفة الأسبوعية</h1>
-          <p style={{ color:'var(--muted)', fontSize:'0.84rem', marginTop:4 }}>قائمة استلام الأعمال وإخلاء المبالغ</p>
+          <p style={{ color:'var(--muted)', fontSize:'0.84rem', marginTop:4 }}>قائمة استلام الأعمال وإطلاق المبالغ (ترسل قبل 24 ساعة للحسابات)</p>
         </div>
         <div style={{ display:'flex', gap:'0.75rem', alignItems:'center' }}>
           <div style={{ position:'relative' }}>
@@ -330,8 +338,8 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
               <div key={rec.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'1rem 1.25rem', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'0.75rem' }}>
                 <div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-                    <span style={{ fontWeight:800, fontSize:'1rem', color:'var(--text)' }}>رئيس الفريق: {rec.team_leader||'—'}</span>
-                    <span style={{ background:'#1d4ed822', color:'#1d4ed8', borderRadius:4, padding:'1px 8px', fontSize:'0.78rem', fontWeight:700 }}>فريق {rec.team_number||'—'}</span>
+                    <span style={{ fontWeight:800, fontSize:'1rem', color:'var(--text)' }}>الفني: {rec.tech_name || '—'}</span>
+                    <span style={{ background:'#1d4ed822', color:'#1d4ed8', borderRadius:4, padding:'1px 8px', fontSize:'0.78rem', fontWeight:700 }}>{rec.work_type || 'عمل ميداني'}</span>
                   </div>
                   <div style={{ display:'flex', gap:14, color:'var(--muted)', fontSize:'0.82rem', alignItems:'center' }}>
                     <span style={{ display:'flex', alignItems:'center', gap:4 }}><Calendar size={12}/> {rec.receipt_date}</span>
@@ -419,25 +427,22 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
 
       {/* Header Info */}
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'1.25rem', marginBottom:'1rem' }}>
-        <SecHead label="بيانات الفريق والموقع" color="#1a1a2e"/>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:'0.7rem' }}>
-          {[
-            ['اسم الموقع', 'site_name'],
-            ['رئيس الفريق', 'team_leader'],
-            ['مشرف الموقع', 'supervisor'],
-            ['الجنسية', 'nationality'],
-          ].map(([lbl, path]) => (
-            <FRow key={path} label={lbl}>
-              {renderInput(path, lbl)}
-            </FRow>
-          ))}
-          <FRow label="تاريخ الاستلام">{renderInput('receipt_date', '', 'date')}</FRow>
-          <FRow label="رقم الفريق">{renderSelect('team_number', ['A', 'B', 'C', 'D', '1', '2', '3'])}</FRow>
-          <FRow label="نوع العمل">{renderInput('work_type', 'مثال: تركيب مرمر')}</FRow>
-          <FRow label="عدد أفراد الفريق">{renderInput('team_count', 'العدد', 'number')}</FRow>
-          <FRow label="رقم الجلسة">{renderInput('session_number', 'رقم الجلسة')}</FRow>
-          <FRow label="نوع الفريق">{renderSelect('team_type', ['دائم', 'مؤقت', 'طارئ'])}</FRow>
-          <FRow label="معد التقرير">{renderInput('prepared_by', 'اسم معد التقرير')}</FRow>
+        <SecHead label="بيانات قائمة استلام الأعمال وإطلاق المبالغ" color="#1a1a2e"/>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:'0.7rem' }}>
+          <FRow label="اسم الموقع">{renderInput('site_name', 'اسم الموقع')}</FRow>
+          <FRow label="اسم الفني">{renderInput('tech_name', 'اسم الفني / ولد موسى / ابو حيدر')}</FRow>
+          <FRow label="التاريخ">{renderInput('receipt_date', '', 'date')}</FRow>
+          <FRow label="رقم وصل الاستلام (الحسابات)">{renderInput('receipt_voucher', 'رقم الوصل')}</FRow>
+          <FRow label="نوع الاستلام">{renderSelect('receipt_type', ['جزئي', 'نهائي'])}</FRow>
+          <FRow label="وحدة القياس">{renderInput('measuring_unit', 'مثال: قطعة / م2')}</FRow>
+          <FRow label="تاريخ البدء بالعمل">{renderInput('start_date', '', 'date')}</FRow>
+
+          <FRow label="مشرف الموقع">{renderInput('supervisor', 'اسم المشرف / م. علي مناف')}</FRow>
+          <FRow label="هل يوجد عقد عمل ؟">{renderSelect('has_contract', ['نعم', 'لا'])}</FRow>
+          <FRow label="نوع العمل">{renderInput('work_type', 'مثال: تطبيق أرضيات -B-')}</FRow>
+          <FRow label="هل توجد مخططات">{renderSelect('has_blueprints', ['نعم', 'لا', 'لا حاجة للمخططات'])}</FRow>
+          <FRow label="معدل الكوادر اليومي">{renderInput('daily_staff_rate', 'معدل الكوادر')}</FRow>
+          <FRow label="سعر الوحدة">{renderInput('unit_price', 'سعر الوحدة')}</FRow>
           <FRow label="تاريخ الانتهاء المتوقع">{renderInput('expected_end_date', '', 'date')}</FRow>
         </div>
       </div>
