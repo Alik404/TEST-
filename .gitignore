@@ -47,7 +47,7 @@ CLAUDE.md
 
 # AI Design Skill & Helper Folders/Files (Excluded from Repo)
 accessibility/
-components/
+/components/
 content/
 design-system/
 design-systems/
