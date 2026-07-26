@@ -373,17 +373,34 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
   const readOnly = viewMode === 'view';
   const ct = cumTotal(), p70v = pct70(), cav = curAdv();
 
-  const Inp = ({ path, placeholder='', type='text' }) => {
-    const val = path.split('.').reduce((o,k)=>o?.[k],form)??'';
-    return readOnly
-      ? <span style={{ fontWeight:600, fontSize:'0.87rem', color:'var(--text)' }}>{val||'—'}</span>
-      : <input type={type} placeholder={placeholder} value={val} onChange={e=>setField(path,e.target.value)} style={IS}/>;
+  const renderInput = (path, placeholder = '', type = 'text') => {
+    const val = path.split('.').reduce((o, k) => o?.[k], form) ?? '';
+    return readOnly ? (
+      <span style={{ fontWeight: 600, fontSize: '0.87rem', color: 'var(--text)' }}>{val || '—'}</span>
+    ) : (
+      <input
+        type={type}
+        placeholder={placeholder}
+        value={val}
+        onChange={(e) => setField(path, e.target.value)}
+        style={IS}
+      />
+    );
   };
-  const Sel = ({ path, options }) => {
-    const val = path.split('.').reduce((o,k)=>o?.[k],form)??'';
-    return readOnly
-      ? <span style={{ fontWeight:600, fontSize:'0.87rem', color:'var(--text)' }}>{val||'—'}</span>
-      : <select value={val} onChange={e=>setField(path,e.target.value)} style={IS}>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>;
+
+  const renderSelect = (path, options) => {
+    const val = path.split('.').reduce((o, k) => o?.[k], form) ?? '';
+    return readOnly ? (
+      <span style={{ fontWeight: 600, fontSize: '0.87rem', color: 'var(--text)' }}>{val || '—'}</span>
+    ) : (
+      <select value={val} onChange={(e) => setField(path, e.target.value)} style={IS}>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
   };
 
   return (
@@ -404,17 +421,24 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'1.25rem', marginBottom:'1rem' }}>
         <SecHead label="بيانات الفريق والموقع" color="#1a1a2e"/>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:'0.7rem' }}>
-          {[['اسم الموقع','site_name'],['رئيس الفريق','team_leader'],['مشرف الموقع','supervisor'],['الجنسية','nationality']].map(([lbl,path])=>(
-            <FRow key={path} label={lbl}><Inp path={path} placeholder={lbl}/></FRow>
+          {[
+            ['اسم الموقع', 'site_name'],
+            ['رئيس الفريق', 'team_leader'],
+            ['مشرف الموقع', 'supervisor'],
+            ['الجنسية', 'nationality'],
+          ].map(([lbl, path]) => (
+            <FRow key={path} label={lbl}>
+              {renderInput(path, lbl)}
+            </FRow>
           ))}
-          <FRow label="تاريخ الاستلام"><Inp path="receipt_date" type="date"/></FRow>
-          <FRow label="رقم الفريق"><Sel path="team_number" options={['A','B','C','D','1','2','3']}/></FRow>
-          <FRow label="نوع العمل"><Inp path="work_type" placeholder="مثال: تركيب مرمر"/></FRow>
-          <FRow label="عدد أفراد الفريق"><Inp path="team_count" type="number" placeholder="العدد"/></FRow>
-          <FRow label="رقم الجلسة"><Inp path="session_number" placeholder="رقم الجلسة"/></FRow>
-          <FRow label="نوع الفريق"><Sel path="team_type" options={['دائم','مؤقت','طارئ']}/></FRow>
-          <FRow label="معد التقرير"><Inp path="prepared_by" placeholder="اسم معد التقرير"/></FRow>
-          <FRow label="تاريخ الانتهاء المتوقع"><Inp path="expected_end_date" type="date"/></FRow>
+          <FRow label="تاريخ الاستلام">{renderInput('receipt_date', '', 'date')}</FRow>
+          <FRow label="رقم الفريق">{renderSelect('team_number', ['A', 'B', 'C', 'D', '1', '2', '3'])}</FRow>
+          <FRow label="نوع العمل">{renderInput('work_type', 'مثال: تركيب مرمر')}</FRow>
+          <FRow label="عدد أفراد الفريق">{renderInput('team_count', 'العدد', 'number')}</FRow>
+          <FRow label="رقم الجلسة">{renderInput('session_number', 'رقم الجلسة')}</FRow>
+          <FRow label="نوع الفريق">{renderSelect('team_type', ['دائم', 'مؤقت', 'طارئ'])}</FRow>
+          <FRow label="معد التقرير">{renderInput('prepared_by', 'اسم معد التقرير')}</FRow>
+          <FRow label="تاريخ الانتهاء المتوقع">{renderInput('expected_end_date', '', 'date')}</FRow>
         </div>
       </div>
 
@@ -497,11 +521,11 @@ tfoot td{background:#e6f4ed!important;font-weight:800;border-top:2px solid #0596
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'1.25rem', marginBottom:'1rem' }}>
         <SecHead label="ملاحظات الموقع ومتابعة المذكرات" color="#dc2626"/>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'0.7rem' }}>
-          <FRow label="عدد الملاحظات التراكمي"><Inp path="total_notes" type="number" placeholder="0"/></FRow>
-          <FRow label="عدد الملاحظات المحلولة"><Inp path="resolved_notes" type="number" placeholder="0"/></FRow>
-          <FRow label="عدد غير المحلولة"><Inp path="unresolved_notes" type="number" placeholder="0"/></FRow>
-          <FRow label="تاريخ آخر استلام للمذكرة"><Inp path="last_memo_date" type="date"/></FRow>
-          <FRow label="نهائي / جزئي"><Sel path="partial_or_final" options={['جزئي','نهائي']}/></FRow>
+          <FRow label="عدد الملاحظات التراكمي">{renderInput("total_notes", "0", "number")}</FRow>
+          <FRow label="عدد الملاحظات المحلولة">{renderInput("resolved_notes", "0", "number")}</FRow>
+          <FRow label="عدد غير المحلولة">{renderInput("unresolved_notes", "0", "number")}</FRow>
+          <FRow label="تاريخ آخر استلام للمذكرة">{renderInput("last_memo_date", "", "date")}</FRow>
+          <FRow label="نهائي / جزئي">{renderSelect("partial_or_final", ['جزئي','نهائي'])}</FRow>
         </div>
       </div>
 
