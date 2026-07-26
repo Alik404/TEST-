@@ -23,7 +23,7 @@ export default function Sidebar({
     { id: 'marble',                label: t('menuMarble'),                 icon: Layers          },
     { id: 'materials-consumption', label: t('menuMaterialsConsumption'),   icon: FileText        },
     { id: 'workers-wages',         label: isAr ? 'أجور العمال' : 'Workers Wages', icon: Banknote },
-    { id: 'weekly-advance',        label: isAr ? 'تسمية السلفة' : 'Weekly Advance', icon: Receipt },
+    { id: 'weekly-advance',        label: isAr ? 'سلفة مقدمة' : 'Advance Payment', icon: Receipt },
     { id: 'daily-updates',        label: isAr ? 'التحديث اليومي' : 'Daily Log', icon: MessageSquare },
   ];
 

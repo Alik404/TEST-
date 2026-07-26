@@ -476,7 +476,7 @@ table.data-tbl tfoot td { font-weight: 800; background: #fff; }
     <div style={{ padding: '1.5rem', maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem', gap:'1rem', flexWrap:'wrap' }}>
         <div>
-          <h1 style={{ fontSize:'1.6rem', fontWeight:800, color:'var(--text)', margin:0 }}>📋 تسمية السلفة الأسبوعية</h1>
+          <h1 style={{ fontSize:'1.6rem', fontWeight:800, color:'var(--text)', margin:0 }}>📋 سلفة مقدمة</h1>
           <p style={{ color:'var(--muted)', fontSize:'0.84rem', marginTop:4 }}>قائمة استلام الأعمال وإطلاق المبالغ (ترسل قبل 24 ساعة للحسابات)</p>
         </div>
         <div style={{ display:'flex', gap:'0.75rem', alignItems:'center' }}>
@@ -705,7 +705,7 @@ table.data-tbl tfoot td { font-weight: 800; background: #fff; }
 
       {/* Financial Summary */}
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'1.25rem' }}>
-        <SecHead label="الملخص المالي — تسمية السلفة الأسبوعية" color="#059669"/>
+        <SecHead label="الملخص المالي — سلفة مقدمة" color="#059669"/>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:'0.75rem' }}>
           {[
             {
