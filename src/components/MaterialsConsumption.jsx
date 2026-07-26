@@ -259,197 +259,93 @@ export default function MaterialsConsumption({ user, t, lang }) {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>جرد استهلاك المواد اليومي - ${report.date}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <title>${docTitle} - ${report.date}</title>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body {
-      font-family: 'Cairo', 'Noto Sans Arabic', Arial, sans-serif;
+      font-family: 'Cairo', sans-serif;
       color: #1a1a2e;
       background: #ffffff;
       direction: rtl;
-      font-size: 11pt;
+      font-size: 10.5pt;
       line-height: 1.6;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .page {
       width: 210mm;
       min-height: 297mm;
       margin: 0 auto;
-      padding: 15mm 18mm 20mm 18mm;
+      padding: 12mm 15mm;
       background: #fff;
     }
-    /* ── Header ── */
     .report-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 12px;
+      padding-bottom: 10px;
       border-bottom: 3px solid #1a1a2e;
-      margin-bottom: 20px;
-    }
-    .header-logo {
-      width: 56px; height: 56px;
-      background: #1a1a2e;
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      color: #f59e0b;
-      font-size: 28px;
-      font-weight: 900;
-      flex-shrink: 0;
+      margin-bottom: 16px;
     }
     .header-org { display: flex; align-items: center; gap: 12px; }
-    .org-text h1 { font-size: 15pt; font-weight: 900; color: #1a1a2e; }
-    .org-text p { font-size: 9.5pt; color: #555; margin-top: 2px; }
-    .header-meta { text-align: left; font-size: 9.5pt; color: #444; line-height: 1.9; }
-    .header-meta .doc-title { font-size: 13pt; font-weight: 800; color: #1a1a2e; margin-bottom: 4px; }
+    .org-text h1 { font-size: 14pt; font-weight: 900; color: #1a1a2e; }
+    .org-text p { font-size: 9pt; color: #555; margin-top: 2px; }
+    .header-meta { text-align: left; font-size: 9pt; color: #444; }
+    .header-meta .doc-title { font-size: 12pt; font-weight: 800; color: #1a1a2e; margin-bottom: 4px; }
     .meta-badge {
-      display: inline-block;
-      background: #f59e0b;
-      color: #fff;
-      font-weight: 700;
-      padding: 2px 10px;
-      border-radius: 20px;
-      font-size: 9pt;
-      margin-bottom: 4px;
+      display: inline-block; background: #f59e0b; color: #fff;
+      font-weight: 700; padding: 2px 10px; border-radius: 20px; font-size: 8.5pt; margin-bottom: 4px;
     }
-    /* ── Info Bar ── */
     .info-bar {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 0;
-      border: 1.5px solid #d0d0d8;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 22px;
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
+      border: 1.5px solid #d0d0d8; border-radius: 8px; overflow: hidden; margin-bottom: 18px;
     }
-    .info-cell {
-      padding: 8px 12px;
-      border-left: 1px solid #d0d0d8;
-      text-align: center;
-    }
+    .info-cell { padding: 6px 10px; border-left: 1px solid #d0d0d8; text-align: center; }
     .info-cell:last-child { border-left: none; }
-    .info-cell .lbl { font-size: 8.5pt; color: #888; font-weight: 600; }
-    .info-cell .val { font-size: 10.5pt; font-weight: 800; color: #1a1a2e; margin-top: 2px; }
-    /* ── Section ── */
-    .section { margin-bottom: 20px; }
+    .info-cell .lbl { font-size: 8pt; color: #777; font-weight: 600; }
+    .info-cell .val { font-size: 10pt; font-weight: 800; color: #1a1a2e; }
+    .section { margin-bottom: 18px; }
     .section-title {
-      font-size: 11pt;
-      font-weight: 800;
-      color: #fff;
-      background: #1a1a2e;
-      padding: 7px 14px;
-      border-radius: 6px 6px 0 0;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 11pt; font-weight: 800; color: #fff; background: #1a1a2e;
+      padding: 6px 12px; border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 8px;
     }
     .section-title .num {
-      background: #f59e0b;
-      color: #1a1a2e;
-      border-radius: 50%;
-      width: 22px; height: 22px;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 10pt; font-weight: 900;
+      background: #f59e0b; color: #1a1a2e; border-radius: 50%; width: 20px; height: 20px;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 9.5pt; font-weight: 900;
     }
-    /* ── Tables ── */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 10.5pt;
-      border: 1.5px solid #d0d0d8;
-      border-top: none;
-    }
-    th {
-      background: #f0f0f5;
-      font-weight: 700;
-      color: #333;
-      padding: 8px 10px;
-      border: 1px solid #d0d0d8;
-      text-align: right;
-    }
-    td {
-      padding: 7px 10px;
-      border: 1px solid #e0e0e8;
-      color: #1a1a2e;
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 10pt; border: 1.5px solid #d0d0d8; }
+    th { background: #f0f0f5; font-weight: 700; color: #333; padding: 6px 10px; border: 1px solid #d0d0d8; text-align: right; }
+    td { padding: 6px 10px; border: 1px solid #e0e0e8; color: #1a1a2e; }
     tbody tr:nth-child(even) { background: #fafafa; }
-    tbody tr:hover { background: #fff8e6; }
-    /* ── Bulk Row ── */
-    .bulk-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 0;
-      border: 1.5px solid #d0d0d8;
-      border-top: none;
-    }
-    .bulk-cell {
-      padding: 10px 14px;
-      border-left: 1px solid #d0d0d8;
-      text-align: center;
-    }
+    .bulk-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border: 1.5px solid #d0d0d8; border-top: none; }
+    .bulk-cell { padding: 8px 12px; border-left: 1px solid #d0d0d8; text-align: center; }
     .bulk-cell:last-child { border-left: none; }
-    .bulk-cell .bc-lbl { font-size: 9pt; color: #888; font-weight: 600; }
-    .bulk-cell .bc-val { font-size: 12pt; font-weight: 800; color: #1a1a2e; margin-top: 3px; }
-    /* ── Notes ── */
+    .bulk-cell .bc-lbl { font-size: 8.5pt; color: #777; font-weight: 600; }
+    .bulk-cell .bc-val { font-size: 11pt; font-weight: 800; color: #1a1a2e; margin-top: 2px; }
     .notes-box {
-      border: 1.5px solid #f59e0b;
-      border-radius: 0 0 6px 6px;
-      padding: 12px 14px;
-      background: #fffbeb;
-      border-top: none;
+      border: 1.5px solid #f59e0b; border-radius: 0 0 6px 6px; padding: 8px 12px;
+      background: #fffbeb; border-top: none; margin-top: 4px;
     }
-    .notes-box .section-label { font-size: 9pt; color: #b45309; font-weight: 700; margin-bottom: 5px; }
-    .notes-box p { font-size: 10.5pt; color: #444; line-height: 1.7; font-style: italic; }
-    /* ── Signatures ── */
-    .signatures {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-top: 30px;
-      padding-top: 20px;
-      border-top: 2px dashed #bbb;
-    }
-    .sig-box {
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      padding: 14px;
-      text-align: center;
-    }
-    .sig-box .sig-title { font-size: 10pt; font-weight: 800; color: #1a1a2e; margin-bottom: 8px; }
-    .sig-box .sig-line {
-      border-top: 1px solid #999;
-      margin: 28px 8px 6px;
-      padding-top: 4px;
-      font-size: 8.5pt;
-      color: #888;
-    }
-    /* ── Footer ── */
-    .report-footer {
-      margin-top: 24px;
-      padding-top: 10px;
-      border-top: 1px solid #e0e0e0;
-      display: flex;
-      justify-content: space-between;
-      font-size: 8pt;
-      color: #aaa;
-    }
-    /* ── Print ── */
+    .notes-box .section-label { font-size: 8.5pt; color: #b45309; font-weight: 800; margin-bottom: 3px; }
+    .notes-box p { font-size: 9.5pt; color: #333; line-height: 1.5; font-style: italic; white-space: pre-line; }
+    .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 25px; padding-top: 15px; border-top: 2px dashed #bbb; }
+    .sig-box { border: 1px solid #ccc; border-radius: 8px; padding: 10px; text-align: center; }
+    .sig-box .sig-title { font-size: 9.5pt; font-weight: 800; color: #1a1a2e; margin-bottom: 6px; }
+    .sig-box .sig-line { border-top: 1px solid #999; margin: 22px 8px 4px; padding-top: 4px; font-size: 8pt; color: #888; }
+    .report-footer { margin-top: 20px; padding-top: 8px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; font-size: 8pt; color: #aaa; }
     @media print {
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .page { width: 100%; padding: 10mm 14mm; }
-      .no-print { display: none !important; }
+      .page { width: 100%; padding: 8mm 12mm; }
     }
   </style>
 </head>
 <body>
   <div class="page">
-    <!-- HEADER -->
     <div class="report-header">
       <div class="header-org">
-        <div class="header-logo" style="background: transparent; border-radius: 0; width: 80px; height: 80px;">
-          <img src="https://mvco-iq.com/wp-content/uploads/2024/10/cropped-2color_logo.webp" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+        <div style="width: 60px; height: 60px;">
+          <img src="https://mvco-iq.com/wp-content/uploads/2024/10/cropped-2color_logo.webp" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;"/>
         </div>
         <div class="org-text">
           <h1>متابعة موقع الجندي المجهول</h1>
@@ -457,14 +353,13 @@ export default function MaterialsConsumption({ user, t, lang }) {
         </div>
       </div>
       <div class="header-meta">
-        <div class="doc-title">تقرير جرد واستهلاك المواد اليومي</div>
-        <div class="meta-badge">وثيقة رسمية</div><br/>
-        <span>التاريخ: <strong>${report.date}</strong></span><br/>
+        <div class="doc-title">${docTitle}</div>
+        <div class="meta-badge">وثيقة رسمية معتمدة</div><br/>
+        <span>التاريخ: <strong>${report.date}</strong></span> &nbsp;|&nbsp;
         <span>اليوم: <strong>${dayLabel}</strong></span>
       </div>
     </div>
 
-    <!-- INFO BAR -->
     <div class="info-bar">
       <div class="info-cell"><div class="lbl">التاريخ</div><div class="val">${report.date}</div></div>
       <div class="info-cell"><div class="lbl">اليوم</div><div class="val">${dayLabel}</div></div>
@@ -473,34 +368,37 @@ export default function MaterialsConsumption({ user, t, lang }) {
       <div class="info-cell"><div class="lbl">معد التقرير</div><div class="val">${report.prepared_by || '-'}</div></div>
     </div>
 
-    <!-- SECTION 1: BASICS -->
+    ${showBasics ? `
     <div class="section">
       <div class="section-title"><span class="num">1</span> الماربلتكس والمواد الأساسية</div>
       <table>
         <thead><tr><th style="width:50%">المادة</th><th style="width:25%;text-align:center">الكمية المسحوبة</th><th style="width:25%;text-align:center">الكمية المتبقية</th></tr></thead>
         <tbody>${basicsRows || '<tr><td colspan="3" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
       </table>
-    </div>
+      ${report.basics_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد الأساسية</div><p>${report.basics_notes}</p></div>` : ''}
+    </div>` : ''}
 
-    <!-- SECTION 2: MARBLE -->
+    ${showMarble ? `
     <div class="section">
       <div class="section-title"><span class="num">2</span> جرد المرمر (حسب الزون واللون)</div>
       <table>
         <thead><tr><th>الزون</th><th>النوع</th><th style="text-align:center">عدد السكيبات</th><th style="text-align:center">قطع/سكيبة</th><th style="text-align:center">الفرط</th><th style="text-align:center">المجموع</th></tr></thead>
         <tbody>${marbleRows || '<tr><td colspan="6" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
       </table>
-    </div>
+      ${report.marble_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المرمر</div><p>${report.marble_notes}</p></div>` : ''}
+    </div>` : ''}
 
-    <!-- SECTION 3: SEALANTS -->
+    ${showSealants ? `
     <div class="section">
       <div class="section-title"><span class="num">3</span> جرد الصوصج والمواد العازلة</div>
       <table>
         <thead><tr><th style="width:50%">المادة</th><th style="width:25%;text-align:center">الكمية المسحوبة</th><th style="width:25%;text-align:center">الكمية المتبقية</th></tr></thead>
         <tbody>${sealantsRows || '<tr><td colspan="3" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
       </table>
-    </div>
+      ${report.sealants_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد العازلة</div><p>${report.sealants_notes}</p></div>` : ''}
+    </div>` : ''}
 
-    <!-- SECTION 4: BULK -->
+    ${showBulk ? `
     <div class="section">
       <div class="section-title"><span class="num">4</span> المواد السائبة (أسمنت ورمل وفوم)</div>
       <div class="bulk-grid">
@@ -508,34 +406,40 @@ export default function MaterialsConsumption({ user, t, lang }) {
         <div class="bulk-cell"><div class="bc-lbl">كمية الرمل</div><div class="bc-val">${report.bulk?.sand || '-'}</div></div>
         <div class="bulk-cell"><div class="bc-lbl">الفوم (مسحوب / متبقي)</div><div class="bc-val">${report.bulk?.foam?.pulled || '-'} / ${report.bulk?.foam?.remaining || '-'}</div></div>
       </div>
-    </div>
+      ${report.bulk_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد السائبة</div><p>${report.bulk_notes}</p></div>` : ''}
+    </div>` : ''}
 
-    <!-- NOTES -->
-    ${report.notes ? `<div class="section"><div class="section-title"><span class="num">5</span> ملاحظات وتحديثات الاستهلاك</div>${notesBlock}</div>` : ''}
+    ${report.notes ? `
+    <div class="notes-box" style="border-color:#1a1a2e;background:#f8f9fa;">
+      <div class="section-label" style="color:#1a1a2e;">ملاحظات وتحديثات الاستهلاك العامة:</div>
+      <p style="font-style:normal;">${report.notes}</p>
+    </div>` : ''}
 
-    <!-- SIGNATURES -->
     <div class="signatures">
-      <div class="sig-box"><div class="sig-title">دائرة المهندس المقيم</div><div class="sig-line">التوقيع والختم</div></div>
-      <div class="sig-box"><div class="sig-title">الشركة المنفذة (جرد المخزن)</div><div class="sig-line">التوقيع والختم</div></div>
-      <div class="sig-box"><div class="sig-title">ممثل الجهة المستفيدة</div><div class="sig-line">التوقيع والختم</div></div>
+      <div class="sig-box"><div class="sig-title">مشرف الموقع</div><div class="sig-line">التوقيع والتاريخ</div></div>
+      <div class="sig-box"><div class="sig-title">المعاون الفني</div><div class="sig-line">التوقيع والتاريخ</div></div>
+      <div class="sig-box"><div class="sig-title">معد التقرير</div><div class="sig-line">${report.prepared_by || 'علي حاتم'}</div></div>
     </div>
 
-    <!-- FOOTER -->
     <div class="report-footer">
-      <span>متابعة موقع الجندي المجهول &mdash; شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</span>
-      <span>تم الإنشاء: ${new Date().toLocaleDateString('ar-EG')} &nbsp;|&nbsp; ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+      <span>متابعة موقع الجندي المجهول - شركة رؤية الحداثة للخدمات الهندسية</span>
+      <span>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</span>
     </div>
   </div>
   <script>
     window.onload = function() {
-      setTimeout(function() { window.print(); }, 800);
+      setTimeout(function() { window.print(); }, 500);
     };
   <\/script>
 </body>
 </html>`;
 
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) {
+    const win = window.open('', '_blank', 'width=900,height=1100');
+    if (win) {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    } else {
       const printFrame = document.createElement('iframe');
       printFrame.style.position = 'fixed';
       printFrame.style.top = '-1000px';
@@ -547,37 +451,22 @@ export default function MaterialsConsumption({ user, t, lang }) {
 
       const frameDoc = printFrame.contentWindow.document;
       frameDoc.open();
-      frameDoc.write(html.replace('window.close();', ''));
+      frameDoc.write(html);
       frameDoc.close();
 
       setTimeout(() => {
-        document.body.removeChild(printFrame);
-      }, 15000);
-    } else {
-      const win = window.open('', '_blank', 'width=900,height=1100');
-      if (win) {
-        win.document.open();
-        win.document.write(html);
-        win.document.close();
-      } else {
-        const printFrame = document.createElement('iframe');
-        printFrame.style.position = 'fixed';
-        printFrame.style.top = '-1000px';
-        printFrame.style.left = '-1000px';
-        printFrame.style.width = '1px';
-        printFrame.style.height = '1px';
-        printFrame.style.border = 'none';
-        document.body.appendChild(printFrame);
-
-        const frameDoc = printFrame.contentWindow.document;
-        frameDoc.open();
-        frameDoc.write(html.replace('window.close();', ''));
-        frameDoc.close();
-
+        try {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+        } catch (err) {
+          console.error(err);
+        }
         setTimeout(() => {
-          document.body.removeChild(printFrame);
-        }, 15000);
-      }
+          if (document.body.contains(printFrame)) {
+            document.body.removeChild(printFrame);
+          }
+        }, 10000);
+      }, 500);
     }
   };
 
