@@ -20,6 +20,7 @@ const INITIAL_FORM_STATE = {
     primer: { pulled: '', remaining: '' },
     roller: { pulled: '', remaining: '' }
   },
+  basics_notes: '',
   marble: {
     zone_a: {
       white: { skiliat: '', pieces_per_skilia: '198', loose: '', total: 0 },
@@ -34,6 +35,7 @@ const INITIAL_FORM_STATE = {
       brown: { skiliat: '', pieces_per_skilia: '198', loose: '', total: 0 }
     }
   },
+  marble_notes: '',
   sealants: {
     beige_paint: { pulled: '', remaining: '' },
     white_paint: { pulled: '', remaining: '' },
@@ -43,11 +45,13 @@ const INITIAL_FORM_STATE = {
     sponge_2cm: { pulled: '', remaining: '' },
     sponge_3cm: { pulled: '', remaining: '' }
   },
+  sealants_notes: '',
   bulk: {
     cement: '',
     sand: '',
     foam: { pulled: '', remaining: '' }
   },
+  bulk_notes: '',
   notes: ''
 };
 
@@ -101,10 +105,12 @@ export default function MaterialsConsumption({ user, t, lang }) {
       putty: 'معجون', primer: 'برايمر', roller: 'رولة'
     };
     Object.keys(report.basics || {}).forEach(k => {
-      const oldRem = prevReport.basics?.[k]?.remaining || '0';
-      const newRem = report.basics?.[k]?.remaining || '0';
-      if (oldRem !== newRem && (oldRem !== '0' || newRem !== '0')) {
-        list.push(`<li><strong>${basicsLabels[k] || k}:</strong> السابق (${oldRem}) &larr; المحدث (${newRem})</li>`);
+      const oldP = prevReport.basics?.[k]?.pulled || '-';
+      const newP = report.basics?.[k]?.pulled || '-';
+      const oldR = prevReport.basics?.[k]?.remaining || '-';
+      const newR = report.basics?.[k]?.remaining || '-';
+      if (oldP !== newP || oldR !== newR) {
+        list.push(`<li><strong>${basicsLabels[k] || k}:</strong> مسحوب (${oldP} &rarr; ${newP}) | متبقي (${oldR} &rarr; ${newR})</li>`);
       }
     });
 
@@ -115,31 +121,27 @@ export default function MaterialsConsumption({ user, t, lang }) {
       sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
     };
     Object.keys(report.sealants || {}).forEach(k => {
-      const oldRem = prevReport.sealants?.[k]?.remaining || '0';
-      const newRem = report.sealants?.[k]?.remaining || '0';
-      if (oldRem !== newRem && (oldRem !== '0' || newRem !== '0')) {
-        list.push(`<li><strong>${sealantsLabels[k] || k}:</strong> السابق (${oldRem}) &larr; المحدث (${newRem})</li>`);
+      const oldP = prevReport.sealants?.[k]?.pulled || '-';
+      const newP = report.sealants?.[k]?.pulled || '-';
+      const oldR = prevReport.sealants?.[k]?.remaining || '-';
+      const newR = report.sealants?.[k]?.remaining || '-';
+      if (oldP !== newP || oldR !== newR) {
+        list.push(`<li><strong>${sealantsLabels[k] || k}:</strong> مسحوب (${oldP} &rarr; ${newP}) | متبقي (${oldR} &rarr; ${newR})</li>`);
       }
     });
 
     // Bulk
-    const oldCement = prevReport.bulk?.cement || '0';
-    const newCement = report.bulk?.cement || '0';
-    if (oldCement !== newCement && (oldCement !== '0' || newCement !== '0')) {
-      list.push(`<li><strong>كمية الأسمنت:</strong> السابق (${oldCement}) &larr; المحدث (${newCement})</li>`);
-    }
+    const oldC = prevReport.bulk?.cement || '-';
+    const newC = report.bulk?.cement || '-';
+    if (oldC !== newC) list.push(`<li><strong>الأسمنت:</strong> (${oldC} &rarr; ${newC})</li>`);
 
-    const oldSand = prevReport.bulk?.sand || '0';
-    const newSand = report.bulk?.sand || '0';
-    if (oldSand !== newSand && (oldSand !== '0' || newSand !== '0')) {
-      list.push(`<li><strong>كمية الرمل:</strong> السابق (${oldSand}) &larr; المحدث (${newSand})</li>`);
-    }
+    const oldS = prevReport.bulk?.sand || '-';
+    const newS = report.bulk?.sand || '-';
+    if (oldS !== newS) list.push(`<li><strong>الرمل:</strong> (${oldS} &rarr; ${newS})</li>`);
 
-    const oldFoam = prevReport.bulk?.foam?.remaining || '0';
-    const newFoam = report.bulk?.foam?.remaining || '0';
-    if (oldFoam !== newFoam && (oldFoam !== '0' || newFoam !== '0')) {
-      list.push(`<li><strong>الفوم:</strong> السابق (${oldFoam}) &larr; المحدث (${newFoam})</li>`);
-    }
+    const oldFoam = prevReport.bulk?.foam?.pulled || '-';
+    const newFoam = report.bulk?.foam?.pulled || '-';
+    if (oldFoam !== newFoam) list.push(`<li><strong>الفوم:</strong> (${oldFoam} &rarr; ${newFoam})</li>`);
 
     // Marble
     const zones = ['zone_a', 'zone_b', 'zone_c'];
@@ -150,7 +152,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
         const newTotal = report.marble?.[zone]?.[c]?.total || 0;
         if (oldTotal !== newTotal) {
           const colorName = c === 'white' ? 'أبيض' : 'جوزي';
-          list.push(`<li><strong>مرمر ${colorName} (${zoneNames[zone]}):</strong> السابق (${oldTotal}) &larr; المحدث (${newTotal})</li>`);
+          list.push(`<li><strong>مرمر ${colorName} (${zoneNames[zone]}):</strong> السابق (${oldTotal}) &rarr; المحدث (${newTotal})</li>`);
         }
       });
     });
@@ -158,13 +160,24 @@ export default function MaterialsConsumption({ user, t, lang }) {
     return list;
   };
 
-  // ── Generate and print a beautiful PDF report in a new window ──
-  const handlePrintReport = (report) => {
-    const dayLabel = getDayTranslation(report.day || '');
+  // ── Generate and print PDF report (Supports All sections OR Section-specific) ──
+  const handlePrintReport = (report, targetSection = null) => {
+    const dayLabel = report.day || '';
     const zones = ['zone_a', 'zone_b', 'zone_c'];
     const zoneNames = { zone_a: 'زون A', zone_b: 'زون B', zone_c: 'زون C' };
 
-    // Build marble rows
+    // Section 1: Basics
+    let basicsRows = '';
+    const basicsLabels = {
+      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت',
+      brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
+      putty: 'معجون', primer: 'برايمر', roller: 'رولة'
+    };
+    Object.entries(report.basics || {}).forEach(([key, item]) => {
+      basicsRows += `<tr><td>${basicsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
+    });
+
+    // Section 2: Marble
     let marbleRows = '';
     let totalWhiteSkiliat = 0, totalBrownSkiliat = 0;
     let totalWhiteLoose = 0, totalBrownLoose = 0;
@@ -218,18 +231,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
       </tr>
     `;
 
-    // Build basics rows
-    let basicsRows = '';
-    const basicsLabels = {
-      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت',
-      brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
-      putty: 'معجون', primer: 'برايمر', roller: 'رولة'
-    };
-    Object.entries(report.basics || {}).forEach(([key, item]) => {
-      basicsRows += `<tr><td>${basicsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
-    });
-
-    // Build sealants rows
+    // Section 3: Sealants
     let sealantsRows = '';
     const sealantsLabels = {
       beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض',
@@ -240,9 +242,17 @@ export default function MaterialsConsumption({ user, t, lang }) {
       sealantsRows += `<tr><td>${sealantsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
     });
 
-    const notesBlock = report.notes
-      ? `<div class="notes-box"><div class="section-label">الملاحظات</div><p>${report.notes}</p></div>`
-      : '';
+    // Section titles and filters
+    const docTitle = targetSection === 'basics' ? 'جرد الماربلتكس والمواد الأساسية'
+      : targetSection === 'marble' ? 'جرد ورصيد المرمر'
+      : targetSection === 'sealants' ? 'جرد المواد العازلة والصوصج'
+      : targetSection === 'bulk' ? 'جرد المواد السائبة والإسفنج'
+      : 'تقرير جرد واستهلاك المواد اليومي (الكامل)';
+
+    const showBasics   = !targetSection || targetSection === 'basics';
+    const showMarble   = !targetSection || targetSection === 'marble';
+    const showSealants = !targetSection || targetSection === 'sealants';
+    const showBulk     = !targetSection || targetSection === 'bulk';
 
     const html = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -974,10 +984,21 @@ export default function MaterialsConsumption({ user, t, lang }) {
                                   
                                   {/* Basics details */}
                                   <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <h4 style={{ fontSize: '1rem', fontWeight: '800', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                      <Layers size={18} />
-                                      {t('sectionBasics')}
-                                    </h4>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
+                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <Layers size={18} />
+                                        {t('sectionBasics')}
+                                      </h4>
+                                      <button
+                                        className="btn btn-secondary"
+                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'basics'); }}
+                                        title={lang === 'ar' ? 'طباعة قسم الأساسيات' : 'Print Basics'}
+                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                      >
+                                        <Printer size={12} />
+                                        PDF
+                                      </button>
+                                    </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                                       {Object.entries(report.basics || {}).map(([key, item]) => (
                                         <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
@@ -992,15 +1013,31 @@ export default function MaterialsConsumption({ user, t, lang }) {
                                           </div>
                                         </div>
                                       ))}
+                                      {report.basics_notes && (
+                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
+                                          <strong>ملاحظات الأساسيات:</strong> {report.basics_notes}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
 
                                   {/* Sealants details */}
                                   <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <h4 style={{ fontSize: '1rem', fontWeight: '800', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                      <Sparkles size={18} />
-                                      {t('sectionSealants')}
-                                    </h4>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
+                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <Sparkles size={18} />
+                                        {t('sectionSealants')}
+                                      </h4>
+                                      <button
+                                        className="btn btn-secondary"
+                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'sealants'); }}
+                                        title={lang === 'ar' ? 'طباعة قسم العوازل' : 'Print Sealants'}
+                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                      >
+                                        <Printer size={12} />
+                                        PDF
+                                      </button>
+                                    </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                                       {Object.entries(report.sealants || {}).map(([key, item]) => (
                                         <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
@@ -1015,15 +1052,31 @@ export default function MaterialsConsumption({ user, t, lang }) {
                                           </div>
                                         </div>
                                       ))}
+                                      {report.sealants_notes && (
+                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
+                                          <strong>ملاحظات العوازل:</strong> {report.sealants_notes}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
 
                                   {/* Bulk & Notes */}
                                   <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <h4 style={{ fontSize: '1rem', fontWeight: '800', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                      <FileText size={18} />
-                                      {lang === 'ar' ? `${t('sectionBulk')} و ${t('notes')}` : `${t('sectionBulk')} & ${t('notes')}`}
-                                    </h4>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
+                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <FileText size={18} />
+                                        {lang === 'ar' ? `${t('sectionBulk')} و ${t('notes')}` : `${t('sectionBulk')} & ${t('notes')}`}
+                                      </h4>
+                                      <button
+                                        className="btn btn-secondary"
+                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'bulk'); }}
+                                        title={lang === 'ar' ? 'طباعة قسم السائبة' : 'Print Bulk'}
+                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                      >
+                                        <Printer size={12} />
+                                        PDF
+                                      </button>
+                                    </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
                                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
                                         <span style={{ fontWeight: '500' }}>{t('cementQty')}</span>
@@ -1048,14 +1101,20 @@ export default function MaterialsConsumption({ user, t, lang }) {
                                           </span>
                                         </div>
                                       </div>
+                                      {report.bulk_notes && (
+                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
+                                          <strong>ملاحظات المواد السائبة:</strong> {report.bulk_notes}
+                                        </div>
+                                      )}
                                       {report.notes && (
                                         <div style={{ marginTop: '0.5rem', padding: '0.6rem 0.8rem', borderRadius: '6px', background: 'rgba(255,255,255,0.02)', borderLeft: lang === 'ar' ? 'none' : '3px solid var(--accent)', borderRight: lang === 'ar' ? '3px solid var(--accent)' : 'none' }}>
-                                          <div style={{ fontSize: '0.85rem', color: 'var(--accent)', marginBottom: '4px', fontWeight: '800' }}>{t('notes')} وتحديثات الاستهلاك:</div>
+                                          <div style={{ fontSize: '0.85rem', color: 'var(--accent)', marginBottom: '4px', fontWeight: '800' }}>ملاحظات وتحديثات عامة:</div>
                                           <div style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--fg-2)', whiteSpace: 'pre-line' }}>{report.notes}</div>
                                         </div>
                                       )}
                                     </div>
                                   </div>
+
 
                                   {/* Marble details (Full width spanning) */}
                                   <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)', gridColumn: '1 / -1' }}>
@@ -1240,9 +1299,20 @@ export default function MaterialsConsumption({ user, t, lang }) {
               
               {/* Section 1: Basics */}
               <div className="glass-panel">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {t('sectionBasics')}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
+                    {t('sectionBasics')}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReport(formData, 'basics')}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Printer size={13} />
+                    {lang === 'ar' ? 'طباعة قسم الأساسيات PDF' : 'Print Basics Section PDF'}
+                  </button>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
                   {Object.keys(formData.basics).map((item) => (
                     <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border-soft)' }}>
@@ -1268,13 +1338,37 @@ export default function MaterialsConsumption({ user, t, lang }) {
                     </div>
                   ))}
                 </div>
+                <div style={{ marginTop: '1.2rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
+                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد الأساسية:' : '📝 Basics Section Notes & Updates:'}
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows="2"
+                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بالمواد الأساسية...' : 'Notes for basics section...'}
+                    value={formData.basics_notes || ''}
+                    onChange={(e) => handleFieldChange('basics_notes', null, null, e.target.value)}
+                    style={{ width: '100%', resize: 'vertical' }}
+                  />
+                </div>
               </div>
 
               {/* Section 2: Marble Inventory */}
               <div className="glass-panel">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {t('sectionMarble')}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
+                    {t('sectionMarble')}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReport(formData, 'marble')}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Printer size={13} />
+                    {lang === 'ar' ? 'طباعة قسم المرمر PDF' : 'Print Marble Section PDF'}
+                  </button>
+                </div>
                 
                 <div className="table-responsive">
                   <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr' }}>
@@ -1386,13 +1480,37 @@ export default function MaterialsConsumption({ user, t, lang }) {
                     </tbody>
                   </table>
                 </div>
+                <div style={{ marginTop: '1.2rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
+                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المرمر:' : '📝 Marble Section Notes & Updates:'}
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows="2"
+                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بجرد وتفريغ المرمر...' : 'Notes for marble section...'}
+                    value={formData.marble_notes || ''}
+                    onChange={(e) => handleFieldChange('marble_notes', null, null, e.target.value)}
+                    style={{ width: '100%', resize: 'vertical' }}
+                  />
+                </div>
               </div>
 
               {/* Section 3: Sealants & Sponges */}
               <div className="glass-panel">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {t('sectionSealants')}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
+                    {t('sectionSealants')}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReport(formData, 'sealants')}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Printer size={13} />
+                    {lang === 'ar' ? 'طباعة قسم العوازل PDF' : 'Print Sealants Section PDF'}
+                  </button>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
                   {Object.keys(formData.sealants).map((item) => (
                     <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border-soft)' }}>
@@ -1418,13 +1536,37 @@ export default function MaterialsConsumption({ user, t, lang }) {
                     </div>
                   ))}
                 </div>
+                <div style={{ marginTop: '1.2rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
+                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد العازلة والصوصج:' : '📝 Sealants Section Notes & Updates:'}
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows="2"
+                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بـ الصوصج والعوازل والحيال الاسفنجية...' : 'Notes for sealants section...'}
+                    value={formData.sealants_notes || ''}
+                    onChange={(e) => handleFieldChange('sealants_notes', null, null, e.target.value)}
+                    style={{ width: '100%', resize: 'vertical' }}
+                  />
+                </div>
               </div>
 
               {/* Section 4: Bulk Materials */}
               <div className="glass-panel">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {t('sectionBulk')}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
+                    {t('sectionBulk')}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReport(formData, 'bulk')}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Printer size={13} />
+                    {lang === 'ar' ? 'طباعة قسم السائبة PDF' : 'Print Bulk Section PDF'}
+                  </button>
+                </div>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.2rem' }}>
                   {/* Cement + Sand */}
@@ -1481,16 +1623,29 @@ export default function MaterialsConsumption({ user, t, lang }) {
                     </div>
                   </div>
                 </div>
+                <div style={{ marginTop: '1.2rem' }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
+                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد السائبة الإسمنت والرمل والفوم:' : '📝 Bulk Section Notes & Updates:'}
+                  </label>
+                  <textarea
+                    className="form-input"
+                    rows="2"
+                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بالأسمنت والرمل والفوم...' : 'Notes for bulk section...'}
+                    value={formData.bulk_notes || ''}
+                    onChange={(e) => handleFieldChange('bulk_notes', null, null, e.target.value)}
+                    style={{ width: '100%', resize: 'vertical' }}
+                  />
+                </div>
               </div>
 
-              {/* Section 5: Notes */}
+              {/* Section 5: General Notes */}
               <div className="glass-panel">
                 <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {t('sectionNotes')}
+                  {lang === 'ar' ? '📝 ملاحظات وتحديثات استهلاك عامة (شاملة)' : '📝 General Consumption Notes & Updates'}
                 </h3>
                 <textarea
                   className="form-input"
-                  rows="4"
+                  rows="3"
                   placeholder={t('materialsReportNotes')}
                   value={formData.notes}
                   onChange={(e) => handleFieldChange('notes', null, null, e.target.value)}
@@ -1499,6 +1654,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
               </div>
 
             </div>
+
 
             {/* Form actions */}
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
