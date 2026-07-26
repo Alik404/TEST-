@@ -49,7 +49,9 @@ const EMPTY_FORM = {
   unresolved_notes: '',
   last_memo_date: '',
   partial_or_final: 'جزئي',
+  pct_70_override: '',
   previous_advances: '',
+  due_advance_override: '',
   remaining_balance: '',
 };
 
@@ -107,8 +109,21 @@ export default function WeeklyAdvance({ user }) {
   };
 
   const cumTotal = (f = form) => (f.quantities||[]).reduce((s, r) => s + (parseFloat(r.price)||0)*(parseFloat(r.qty)||0), 0);
-  const pct70   = (f = form) => Math.round(cumTotal(f) * 0.7);
-  const curAdv  = (f = form) => Math.max(0, pct70(f) - (parseFloat(f.previous_advances)||0));
+  
+  const pct70 = (f = form) => {
+    if (f.pct_70_override !== undefined && f.pct_70_override !== null && f.pct_70_override !== '') {
+      return parseFloat(f.pct_70_override) || 0;
+    }
+    return Math.round(cumTotal(f) * 0.7);
+  };
+
+  const curAdv = (f = form) => {
+    if (f.due_advance_override !== undefined && f.due_advance_override !== null && f.due_advance_override !== '') {
+      return parseFloat(f.due_advance_override) || 0;
+    }
+    const prev = parseFloat(f.previous_advances) || 0;
+    return Math.max(0, pct70(f) - prev);
+  };
 
   const openNew  = () => { setForm(EMPTY_FORM); setEditingId(null); setViewMode('form'); };
   const openEdit = r => { const d = typeof r.data==='string'?JSON.parse(r.data):(r.data||{}); setForm({...EMPTY_FORM,...d}); setEditingId(r.id); setViewMode('form'); };
@@ -693,17 +708,68 @@ table.data-tbl tfoot td { font-weight: 800; background: #fff; }
         <SecHead label="الملخص المالي — تسمية السلفة الأسبوعية" color="#059669"/>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:'0.75rem' }}>
           {[
-            {label:'70% من المجموع الكلي التراكمي',  value:p70v.toLocaleString(), color:'#1d4ed8', auto:true},
-            {label:'مجموع المبالغ المقدمة سابقاً',   path:'previous_advances',    color:'#dc2626'},
-            {label:'مبلغ السلفة المستحق',             value:cav.toLocaleString(),  color:'#059669', big:true, auto:true},
-            {label:'المبلغ المتبقي',                  path:'remaining_balance',    color:'#1d4ed8'},
-          ].map((item,i)=>(
+            {
+              label: '70% من المجموع الكلي التراكمي (قابل للتعديل)',
+              path: 'pct_70_override',
+              color: '#1d4ed8',
+              autoVal: Math.round(cumTotal() * 0.7),
+              currVal: pct70(),
+            },
+            {
+              label: 'مجموع المبالغ المستلمة سابقاً',
+              path: 'previous_advances',
+              color: '#dc2626',
+              currVal: parseFloat(form.previous_advances) || 0,
+            },
+            {
+              label: 'مبلغ السلفة المستحق (قابل للتعديل)',
+              path: 'due_advance_override',
+              color: '#059669',
+              big: true,
+              autoVal: Math.max(0, pct70() - (parseFloat(form.previous_advances) || 0)),
+              currVal: curAdv(),
+            },
+            {
+              label: 'المبلغ المتبقي',
+              path: 'remaining_balance',
+              color: '#1d4ed8',
+              currVal: parseFloat(form.remaining_balance) || 0,
+            },
+          ].map((item, i) => (
             <div key={i} style={{ background:'var(--bg-2)', border:`1.5px solid ${item.color}33`, borderRadius:10, padding:'0.9rem 1rem' }}>
               <div style={{ fontSize:'0.78rem', color:'var(--muted)', marginBottom:6 }}>{item.label}</div>
-              {item.auto||readOnly
-                ? <div style={{ fontSize:item.big?'1.5rem':'1.2rem', fontWeight:800, color:item.color }}>{item.auto?item.value+' د.ع':(parseFloat(form[item.path]||0).toLocaleString()+' د.ع')}</div>
-                : <input type="number" value={form[item.path]||''} onChange={e=>setField(item.path,e.target.value)} placeholder="0" style={{ width:'100%', background:'transparent', border:'none', borderBottom:`2px solid ${item.color}`, padding:'0.3rem 0', fontSize:'1.2rem', fontWeight:800, color:item.color, fontFamily:'inherit', outline:'none' }}/>
-              }
+              {readOnly ? (
+                <div style={{ fontSize: item.big ? '1.5rem' : '1.2rem', fontWeight: 800, color: item.color }}>
+                  {item.currVal.toLocaleString()} د.ع
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    value={form[item.path] ?? ''}
+                    onChange={(e) => setField(item.path, e.target.value)}
+                    placeholder={item.autoVal !== undefined ? item.autoVal.toString() : '0'}
+                    style={{
+                      width: '100%',
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom: `2px solid ${item.color}`,
+                      padding: '0.3rem 0',
+                      fontSize: item.big ? '1.3rem' : '1.15rem',
+                      fontWeight: 800,
+                      color: item.color,
+                      fontFamily: 'inherit',
+                      outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--muted)' }}>د.ع</span>
+                </div>
+              )}
+              {!readOnly && item.autoVal !== undefined && (
+                <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: 4 }}>
+                  المحسوب تلقائياً: {item.autoVal.toLocaleString()} د.ع
+                </div>
+              )}
             </div>
           ))}
         </div>
