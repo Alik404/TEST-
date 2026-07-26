@@ -1,0 +1,24 @@
+{
+  "short_name": "الجندي المجهول",
+  "name": "متابعة موقع الجندي المجهول",
+  "description": "منصة ويب تفاعلية ذكية مخصصة لإدارة وحساب وأرشفة نسب الإنجاز لنصب الجندي المجهول.",
+  "icons": [
+    {
+      "src": "/company-logo.webp",
+      "type": "image/webp",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://mvco-iq.com/wp-content/uploads/2024/10/cropped-2color_logo.webp",
+      "type": "image/webp",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#f59e0b",
+  "display": "standalone",
+  "orientation": "portrait"
+}
