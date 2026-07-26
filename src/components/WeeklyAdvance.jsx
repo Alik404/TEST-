@@ -395,9 +395,9 @@ table.data-tbl tfoot td { font-weight: 800; background: #fff; }
     <tbody>${qtyR}</tbody>
     <tfoot>
       <tr>
-        <td colspan="6" style="text-align:right;font-weight:800;border:1px solid #1a1a2e;">المجموع التراكمي الكلي (بدون خصم الـ 70% )</td>
+        <td colspan="6" style="text-align:right;font-weight:800;border:1px solid #1a1a2e;padding:3px 6px;">المجموع التراكمي الكلي (بدون خصم الـ 70% )</td>
         <td style="text-align:center;font-weight:800;direction:ltr;border:1px solid #1a1a2e;">${ct ? ct.toLocaleString() : ''}</td>
-        <td style="text-align:center;font-weight:700;border:1px solid #1a1a2e;">توقيع المعاون الفني</td>
+        <td style="text-align:center;font-weight:800;font-size:7pt;border:1px solid #1a1a2e;white-space:nowrap;padding:2px;">توقيع المعاون الفني</td>
       </tr>
     </tfoot>
   </table>
