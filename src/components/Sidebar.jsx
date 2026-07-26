@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ClipboardList, Layers,
   LogOut, ChevronLeft, ChevronRight,
-  MessageSquare, FileText, Users, Banknote, Receipt
+  MessageSquare, FileText, Users, Banknote, Receipt, BarChart3
 } from 'lucide-react';
 import companyLogo from '../assets/company-logo.webp';
 
@@ -18,6 +18,7 @@ export default function Sidebar({
   const isAr = lang === 'ar';
 
   const menuItems = [
+    { id: 'executive-summary',    label: isAr ? '📊 التقرير التنفيذي الشامل' : 'Executive Summary', icon: BarChart3 },
     { id: 'dashboard',             label: t('menuDashboard'),              icon: LayoutDashboard },
     { id: 'tracking',              label: t('menuTracking'),               icon: ClipboardList   },
     { id: 'marble',                label: t('menuMarble'),                 icon: Layers          },

@@ -17,6 +17,7 @@ import MaterialsConsumption from './components/MaterialsConsumption';
 import WorkersWages from './components/WorkersWages';
 import WeeklyAdvance from './components/WeeklyAdvance';
 import UsersManagement from './components/UsersManagement';
+import ExecutiveSummary from './components/ExecutiveSummary';
 import LandingPage from './components/LandingPage';
 
 export default function App() {
@@ -386,6 +387,18 @@ export default function App() {
           </div>
         ) : (
           <AnimatePresence mode="wait">
+            {activeTab === 'executive-summary' && (
+              <motion.div
+                key="executive-summary"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <ExecutiveSummary lang={lang} t={t} />
+              </motion.div>
+            )}
+
             {activeTab === 'dashboard' && (
               <motion.div
                 key="dashboard"

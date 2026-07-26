@@ -52,7 +52,8 @@ const INITIAL_FORM_STATE = {
     foam: { pulled: '', remaining: '' }
   },
   bulk_notes: '',
-  notes: ''
+  notes: '',
+  site_images: []
 };
 
 const DAYS_OF_WEEK = {
@@ -73,11 +74,114 @@ export default function MaterialsConsumption({ user, t, lang }) {
   const [expandedReportId, setExpandedReportId] = useState(null);
   const [originalDataForEdit, setOriginalDataForEdit] = useState(null);
 
+  // Thresholds for Low Stock Alerts
+  const DEFAULT_THRESHOLDS = {
+    varnish: 10, granite_granules: 50, brown_paint: 3, gray_base: 5, putty: 10, primer: 10, roller: 5,
+    beige_paint: 10, white_paint: 100, tape: 5, sponge_1cm: 5, sponge_2cm: 5, sponge_3cm: 5,
+    cement: 15, sand: 1
+  };
+
+  const getLowStockItems = (data) => {
+    let alerts = [];
+    if (!data) return alerts;
+
+    const itemNames = {
+      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت', brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
+      putty: 'معجون', primer: 'برايمر (أساسيات)', roller: 'رولة',
+      beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض', tape: 'تيب لاصق',
+      sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم',
+      cement: 'أسمنت', sand: 'رمل'
+    };
+
+    // Basics
+    Object.entries(data.basics || {}).forEach(([k, item]) => {
+      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes') || !item) return;
+      const rem = parseFloat(item.remaining);
+      const thresh = DEFAULT_THRESHOLDS[k];
+      if (thresh !== undefined && !isNaN(rem) && rem <= thresh) {
+        alerts.push({ key: k, name: itemNames[k] || k, category: 'المواد الأساسية والماربلكس', remaining: rem, threshold: thresh });
+      }
+    });
+
+    // Sealants
+    Object.entries(data.sealants || {}).forEach(([k, item]) => {
+      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes') || !item) return;
+      const rem = parseFloat(item.remaining);
+      const thresh = DEFAULT_THRESHOLDS[k];
+      if (thresh !== undefined && !isNaN(rem) && rem <= thresh) {
+        alerts.push({ key: k, name: itemNames[k] || k, category: 'المواد العازلة والصوصج', remaining: rem, threshold: thresh });
+      }
+    });
+
+    // Bulk Cement
+    if (data.bulk?.cement) {
+      const cRem = parseFloat(data.bulk.cement);
+      if (!isNaN(cRem) && cRem <= DEFAULT_THRESHOLDS.cement) {
+        alerts.push({ key: 'cement', name: 'أسمنت (سائبة)', category: 'المواد السائبة', remaining: cRem, threshold: DEFAULT_THRESHOLDS.cement });
+      }
+    }
+
+    return alerts;
+  };
+
+  // Image Upload and Compression
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    files.forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 800;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.65);
+
+          setFormData(prev => {
+            const currentImages = Array.isArray(prev.site_images) ? prev.site_images : [];
+            if (currentImages.length >= 6) return prev;
+            return {
+              ...prev,
+              site_images: [...currentImages, compressedDataUrl]
+            };
+          });
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleRemoveImage = (indexToRemove) => {
+    setFormData(prev => ({
+      ...prev,
+      site_images: (prev.site_images || []).filter((_, idx) => idx !== indexToRemove)
+    }));
+  };
+
   // Helper to ensure section_notes are populated from top-level or embedded JSONB
   const normalizeReport = (rep) => {
     if (!rep) return rep;
     return {
       ...rep,
+      site_images: Array.isArray(rep.site_images) ? rep.site_images : [],
       basics_notes: rep.basics_notes !== undefined ? rep.basics_notes : (rep.basics?.section_notes || rep.basics?.basics_notes || ''),
       marble_notes: rep.marble_notes !== undefined ? rep.marble_notes : (rep.marble?.section_notes || rep.marble?.marble_notes || ''),
       sealants_notes: rep.sealants_notes !== undefined ? rep.sealants_notes : (rep.sealants?.section_notes || rep.sealants?.sealants_notes || ''),
@@ -430,6 +534,18 @@ export default function MaterialsConsumption({ user, t, lang }) {
     <div class="notes-box" style="border-color:#1a1a2e;background:#f8f9fa;">
       <div class="section-label" style="color:#1a1a2e;">ملاحظات وتحديثات الاستهلاك العامة:</div>
       <p style="font-style:normal;">${report.notes}</p>
+    </div>` : ''}
+
+    ${(report.site_images && report.site_images.length > 0) ? `
+    <div style="margin-top:15px;page-break-inside:avoid;">
+      <div class="section-title" style="background:#1a1a2e;color:#fff;">📸 التوثيق الميداني بالصور</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px;border:1.5px solid #d0d0d8;border-top:none;background:#fafafa;">
+        ${report.site_images.map(imgUrl => `
+          <div style="border:1px solid #ccc;border-radius:4px;overflow:hidden;height:110px;background:#eee;">
+            <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;" />
+          </div>
+        `).join('')}
+      </div>
     </div>` : ''}
 
     <div class="signatures">
@@ -1213,6 +1329,82 @@ export default function MaterialsConsumption({ user, t, lang }) {
                   required
                 />
               </div>
+            </div>
+
+            {/* Low Stock Alerts Banner */}
+            {getLowStockItems(formData).length > 0 && (
+              <div className="glass-panel" style={{ padding: '1rem', borderColor: 'var(--danger)', background: 'rgba(239, 68, 68, 0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: 'var(--danger)' }}>
+                  <AlertCircle size={18} />
+                  <strong style={{ fontSize: '0.95rem' }}>
+                    {lang === 'ar' ? '⚠️ تنبيهات الرصيد الحرج في المخزن (انخفاض الكمية المتبقية):' : '⚠️ Low Stock Alerts:'}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {getLowStockItems(formData).map(alert => (
+                    <span 
+                      key={alert.key} 
+                      style={{ 
+                        background: 'rgba(239, 68, 68, 0.15)', 
+                        border: '1px solid rgba(239, 68, 68, 0.3)', 
+                        color: 'var(--danger)', 
+                        padding: '3px 8px', 
+                        borderRadius: '6px', 
+                        fontSize: '0.8rem', 
+                        fontWeight: '700' 
+                      }}
+                    >
+                      {alert.name}: متبقي {alert.remaining} (الحد الأدنى {alert.threshold})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Site Image Attachment Card */}
+            <div className="glass-panel" style={{ padding: '1.2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <label className="form-label" style={{ fontSize: '0.9rem', color: 'var(--accent)', fontWeight: '700', margin: 0 }}>
+                  {lang === 'ar' ? '📸 توثيق صور الموقع الميدانية (حتى 6 صور تدرج في PDF):' : '📸 Site Photos Attachment (up to 6 photos embedded in PDF):'}
+                </label>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  multiple 
+                  id="site-image-input" 
+                  style={{ display: 'none' }} 
+                  onChange={handleImageUpload} 
+                />
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('site-image-input').click()}
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                >
+                  {lang === 'ar' ? '➕ إرفاق صور' : '➕ Attach Photos'}
+                </button>
+              </div>
+
+              {formData.site_images && formData.site_images.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
+                  {formData.site_images.map((imgUrl, idx) => (
+                    <div key={idx} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', height: '90px', border: '1px solid var(--border)' }}>
+                      <img src={imgUrl} alt={`Site ${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(idx)}
+                        style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', border: 'none', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '12px' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: '0.8rem', color: 'var(--muted)', margin: 0, fontStyle: 'italic' }}>
+                  {lang === 'ar' ? 'لم يتم إرفاق صور موقيعية بعد. انقر على "إرفاق صور" لتضمين لقطات من موقع العمل.' : 'No site photos attached yet.'}
+                </p>
+              )}
             </div>
 
             {/* Grid for Sections */}
