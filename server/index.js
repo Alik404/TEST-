@@ -760,6 +760,194 @@ app.delete('/api/materials-consumption/:id', async (req, res) => {
   }
 });
 
+// ── Workers Wages API Endpoints ──
+
+const wagesFilePath = path.join(__dirname, 'data', 'workers_wages.json');
+
+const readWagesData = () => {
+  try {
+    if (!fs.existsSync(wagesFilePath)) return [];
+    const data = fs.readFileSync(wagesFilePath, 'utf8');
+    return JSON.parse(data || '[]');
+  } catch (err) {
+    console.error('Error reading workers wages file:', err);
+    return [];
+  }
+};
+
+const writeWagesData = (data) => {
+  try {
+    const dataDir = path.dirname(wagesFilePath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(wagesFilePath, JSON.stringify(data, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Error writing workers wages file:', err);
+    return false;
+  }
+};
+
+// GET all wages
+app.get('/api/workers-wages', async (req, res) => {
+  try {
+    const { data, error } = await db
+      .from('workers_wages')
+      .select('*')
+      .order('work_date', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    const data = readWagesData();
+    data.sort((a, b) => new Date(b.work_date) - new Date(a.work_date));
+    res.json(data);
+  }
+});
+
+// POST a new wage record
+app.post('/api/workers-wages', async (req, res) => {
+  const record = req.body;
+  if (!record.work_date || !record.work_item) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const shiftsCount = Number(record.shifts_count) || 1;
+  const shiftPrice = Number(record.shift_price) || 0;
+  const totalAmount = shiftsCount * shiftPrice;
+
+  try {
+    const newRecord = {
+      work_date: record.work_date,
+      work_item: record.work_item,
+      worker_name: record.worker_name || 'عمال ابو حيدر',
+      shifts_count: shiftsCount,
+      shift_price: shiftPrice,
+      total_amount: totalAmount,
+      notes: record.notes || '',
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await db
+      .from('workers_wages')
+      .insert([newRecord])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const fallbackData = readWagesData();
+    fallbackData.unshift(data);
+    writeWagesData(fallbackData);
+
+    res.status(201).json(data);
+  } catch (err) {
+    const fallbackData = readWagesData();
+    const newRecord = {
+      id: Date.now().toString(),
+      work_date: record.work_date,
+      work_item: record.work_item,
+      worker_name: record.worker_name || 'عمال ابو حيدر',
+      shifts_count: shiftsCount,
+      shift_price: shiftPrice,
+      total_amount: totalAmount,
+      notes: record.notes || '',
+      created_at: new Date().toISOString()
+    };
+    fallbackData.unshift(newRecord);
+    if (writeWagesData(fallbackData)) {
+      res.status(201).json(newRecord);
+    } else {
+      res.status(500).json({ error: 'Failed to write wage record' });
+    }
+  }
+});
+
+// PUT (update) a wage record
+app.put('/api/workers-wages/:id', async (req, res) => {
+  const { id } = req.params;
+  const record = req.body;
+  const shiftsCount = Number(record.shifts_count) || 1;
+  const shiftPrice = Number(record.shift_price) || 0;
+  const totalAmount = shiftsCount * shiftPrice;
+
+  try {
+    const { data, error } = await db
+      .from('workers_wages')
+      .update({
+        work_date: record.work_date,
+        work_item: record.work_item,
+        worker_name: record.worker_name,
+        shifts_count: shiftsCount,
+        shift_price: shiftPrice,
+        total_amount: totalAmount,
+        notes: record.notes
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (err) {
+    const data = readWagesData();
+    const index = data.findIndex(item => String(item.id) === String(id));
+    if (index === -1) {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    data[index] = {
+      ...data[index],
+      work_date: record.work_date,
+      work_item: record.work_item,
+      worker_name: record.worker_name,
+      shifts_count: shiftsCount,
+      shift_price: shiftPrice,
+      total_amount: totalAmount,
+      notes: record.notes
+    };
+    if (writeWagesData(data)) {
+      res.json(data[index]);
+    } else {
+      res.status(500).json({ error: 'Failed to update wage record' });
+    }
+  }
+});
+
+// DELETE a wage record
+app.delete('/api/workers-wages/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { error } = await db
+      .from('workers_wages')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    const data = readWagesData();
+    const index = data.findIndex(item => String(item.id) === String(id));
+    if (index !== -1) {
+      data.splice(index, 1);
+      writeWagesData(data);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    const data = readWagesData();
+    const index = data.findIndex(item => String(item.id) === String(id));
+    if (index === -1) {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    data.splice(index, 1);
+    if (writeWagesData(data)) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ error: 'Failed to delete record' });
+    }
+  }
+});
+
 // ── User Management API Endpoints ──
 
 // GET all users

@@ -14,6 +14,7 @@ import TrackingLogs from './components/TrackingLogs';
 import MaterialsReport from './components/MaterialsReport';
 import DailyUpdates from './components/DailyUpdates';
 import MaterialsConsumption from './components/MaterialsConsumption';
+import WorkersWages from './components/WorkersWages';
 import UsersManagement from './components/UsersManagement';
 import LandingPage from './components/LandingPage';
 
@@ -456,6 +457,22 @@ export default function App() {
                 transition={{ duration: 0.3 }}
               >
                 <MaterialsConsumption 
+                  user={user}
+                  t={t}
+                  lang={lang}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === 'workers-wages' && (
+              <motion.div
+                key="workers-wages"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <WorkersWages 
                   user={user}
                   t={t}
                   lang={lang}
