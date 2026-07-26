@@ -132,7 +132,7 @@ export default function WeeklyAdvance({ user }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = { receipt_date: form.receipt_date, team_leader: form.team_leader, site_name: form.site_name, team_number: form.team_number, data: JSON.stringify(form) };
+      const payload = { receipt_date: form.receipt_date, team_leader: form.tech_name || '', site_name: form.site_name || '', team_number: form.work_type || '', data: JSON.stringify(form) };
       const res = await fetch(editingId?`/api/weekly-advance/${editingId}`:'/api/weekly-advance', { method: editingId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('فشل الحفظ');
       await fetch_(); setViewMode('list');
