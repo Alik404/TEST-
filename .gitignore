@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies & Build Outputs
 node_modules
 dist
 dist-ssr
@@ -23,20 +24,40 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local env files
+# Environment & Secret files
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# Database & local data logs
+# Database & local sqlite files
+server/project.db
 server/data/materials_consumption.json
 server/uploads/*
 !server/uploads/.gitkeep
 
-# Agent & Cursor directories
+# AI Agent & Workspace Skill Directories (Excluded from Repo)
 .agent/
 .agents/
+.claude/
 .cursor/
+skills-lock.json
+CLAUDE.md
+
+# AI Design Skill & Helper Folders/Files (Excluded from Repo)
+accessibility/
+content/
+design-system/
+design-systems/
+frameworks/
+taste/
+tokens/
+workflows/
+scripts/
+*.cjs
+extracted_ui_changes.json
+dashboard_changes.json
+design-system.md
+design-system-tech.md
 
