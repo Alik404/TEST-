@@ -1,68 +1,24 @@
 [
   {
-    "id": "1",
-    "work_date": "2026-07-21",
-    "work_item": "تنظيف جوينات",
+    "id": "1786012709387",
+    "work_date": "2026-08-02",
+    "work_item": "تصنيف نزلات",
     "worker_name": "عمال ابو حيدر",
     "shifts_count": 2,
     "shift_price": 30000,
     "total_amount": 60000,
-    "notes": "تنظيف النزلات لأجل اكمال هناك الشربت",
-    "created_at": "2026-07-21T12:00:00.000Z"
+    "notes": "اكمال تنضيف النزلات الاجل اكمال اعمال الجلي والشربتة",
+    "created_at": "2026-08-06T10:38:29.387Z"
   },
   {
-    "id": "2",
-    "work_date": "2026-07-20",
-    "work_item": "تنظيف نزلات",
+    "id": "1786012607713",
+    "work_date": "2026-08-01",
+    "work_item": "تصنيف نزلات",
     "worker_name": "عمال ابو حيدر",
     "shifts_count": 2,
     "shift_price": 30000,
     "total_amount": 60000,
-    "notes": "",
-    "created_at": "2026-07-20T12:00:00.000Z"
-  },
-  {
-    "id": "3",
-    "work_date": "2026-07-19",
-    "work_item": "تنظيف نزلات",
-    "worker_name": "عمال ابو حيدر",
-    "shifts_count": 1,
-    "shift_price": 30000,
-    "total_amount": 30000,
-    "notes": "",
-    "created_at": "2026-07-19T12:00:00.000Z"
-  },
-  {
-    "id": "4",
-    "work_date": "2026-07-18",
-    "work_item": "تنظيف نزلات",
-    "worker_name": "عمال ابو حيدر",
-    "shifts_count": 2,
-    "shift_price": 30000,
-    "total_amount": 60000,
-    "notes": "",
-    "created_at": "2026-07-18T12:00:00.000Z"
-  },
-  {
-    "id": "5",
-    "work_date": "2026-07-16",
-    "work_item": "تنظيف نزلات",
-    "worker_name": "عمال ابو حيدر",
-    "shifts_count": 2,
-    "shift_price": 30000,
-    "total_amount": 60000,
-    "notes": "",
-    "created_at": "2026-07-16T12:00:00.000Z"
-  },
-  {
-    "id": "6",
-    "work_date": "2026-07-15",
-    "work_item": "تنظيف نزلات",
-    "worker_name": "عمال ابو حيدر",
-    "shifts_count": 1,
-    "shift_price": 30000,
-    "total_amount": 30000,
-    "notes": "",
-    "created_at": "2026-07-15T12:00:00.000Z"
+    "notes": "اكمال تنضيف النزلات الاجل اكمال اعمال الجلي والشربتة",
+    "created_at": "2026-08-06T10:36:47.713Z"
   }
 ]

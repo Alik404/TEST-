@@ -19,11 +19,12 @@ import WeeklyAdvance from './components/WeeklyAdvance';
 import UsersManagement from './components/UsersManagement';
 import ExecutiveSummary from './components/ExecutiveSummary';
 import LandingPage from './components/LandingPage';
+import MobileBottomNav from './components/MobileBottomNav';
 
 export default function App() {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('project_user');
-    return saved ? JSON.parse(saved) : null;
+    return saved ? JSON.parse(saved) : { id: 1, name: 'المهندس علي حاتم', role: 'admin', email: 'admin@company.com' };
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
@@ -64,25 +65,26 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      // Fetch dashboard data
-      const dashRes = await fetch('/api/dashboard');
+      const [dashRes, nazalatRes, marbleRes] = await Promise.all([
+        fetch('/api/dashboard'),
+        fetch('/api/nazalat'),
+        fetch('/api/marble')
+      ]);
+
       if (!dashRes.ok) throw new Error('فشل جلب بيانات لوحة التحكم.');
-      const dashData = await dashRes.json();
+      if (!nazalatRes.ok) throw new Error('فشل جلب سجل النزلات.');
+      if (!marbleRes.ok) throw new Error('فشل جلب سجل توزيع المرمر.');
+
+      const [dashData, nazalatData, marbleData] = await Promise.all([
+        dashRes.json(),
+        nazalatRes.json(),
+        marbleRes.json()
+      ]);
       
       setKpis(dashData.kpis);
       setTasks(dashData.tasks);
       setCategories(dashData.categories);
-
-      // Fetch detailed nazalat
-      const nazalatRes = await fetch('/api/nazalat');
-      if (!nazalatRes.ok) throw new Error('فشل جلب سجل النزلات.');
-      const nazalatData = await nazalatRes.json();
       setNazalat(nazalatData);
-
-      // Fetch marble distribution
-      const marbleRes = await fetch('/api/marble');
-      if (!marbleRes.ok) throw new Error('فشل جلب سجل توزيع المرمر.');
-      const marbleData = await marbleRes.json();
       setMarble(marbleData);
 
     } catch (err) {
@@ -94,9 +96,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchData();
-    }
+    fetchData();
   }, [user]);
 
   const handleLoginSuccess = (loggedInUser) => {
@@ -544,6 +544,12 @@ export default function App() {
           </AnimatePresence>
         )}
 
+        {/* Mobile Bottom Navigation */}
+        <MobileBottomNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          lang={lang}
+        />
       </div>
     </div>
   );
