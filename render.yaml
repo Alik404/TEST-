@@ -3,9 +3,11 @@ services:
     name: alihate-unkowne
     env: node
     plan: free
-    buildCommand: npm install && npm rebuild sqlite3 --build-from-source && npm run build
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
