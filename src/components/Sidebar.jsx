@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, ClipboardList, Layers,
   LogOut, ChevronLeft, ChevronRight,
@@ -16,6 +17,13 @@ export default function Sidebar({
   mobileOpen, setMobileOpen,
 }) {
   const isAr = lang === 'ar';
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const menuItems = [
     { id: 'executive-summary',    label: isAr ? '📊 التقرير التنفيذي الشامل' : 'Executive Summary', icon: BarChart3 },
@@ -43,8 +51,14 @@ export default function Sidebar({
   return (
     <motion.aside
       layout
-      className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
-      transition={SPRING}
+      className={`sidebar ${collapsed ? 'collapsed' : ''}`}
+      animate={
+        isMobile
+          ? { x: mobileOpen ? '0%' : '100%' }
+          : { x: '0%' }
+      }
+      transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+      style={{ willChange: 'transform' }}
     >
       {/* ── Brand header ─────────────────────────────────────────── */}
       <div className="sidebar-header">
