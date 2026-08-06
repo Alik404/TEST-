@@ -14,7 +14,7 @@
     "preview": "vite preview"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
