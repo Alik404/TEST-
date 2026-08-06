@@ -11,7 +11,8 @@
     "build": "vite build",
     "start": "node server/index.js",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "npm rebuild sqlite3 --build-from-source"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
