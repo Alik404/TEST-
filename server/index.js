@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import { dbAll, dbGet, dbRun, db } from './database.js';
+import { 
+  dbAll, dbGet, dbRun, 
+  sqliteAll, sqliteGet, sqliteRun, 
+  supabase, isSupabaseActive, 
+  getJsonFallback, saveJsonFallback 
+} from './database.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,20 +19,31 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Ensure uploads folder exists
+// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use('/api/uploads', express.static(uploadsDir));
 
-// Log requests
+// Request logging middleware
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// 1. Authentication Endpoint
+// ── Health Check Endpoint ───────────────────────────────────────────────────
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    database_mode: isSupabaseActive() ? 'supabase_cloud' : 'sqlite_local',
+    uptime_seconds: Math.floor(process.uptime()),
+    version: '2.0.0'
+  });
+});
+
+// ── 1. Authentication Endpoint ──────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -36,10 +52,27 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
-    const user = await dbGet(
-      'SELECT id, email, name, role FROM users WHERE email = ? AND password = ?',
-      [email, password]
-    );
+    let user = null;
+    if (isSupabaseActive()) {
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('id, email, name, role')
+          .eq('email', email.trim().toLowerCase())
+          .eq('password', password)
+          .maybeSingle();
+        user = data;
+      } catch (err) {
+        console.warn('Supabase login query fallback:', err.message);
+      }
+    }
+
+    if (!user) {
+      user = await sqliteGet(
+        'SELECT id, email, name, role FROM users WHERE LOWER(email) = LOWER(?) AND password = ?',
+        [email.trim(), password]
+      );
+    }
 
     if (user) {
       res.json({ user });
@@ -48,33 +81,29 @@ app.post('/api/login', async (req, res) => {
     }
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'حدث خطأ في الخادم.' });
+    res.status(500).json({ error: 'حدث خطأ في الخادم أثناء تسجيل الدخول.' });
   }
 });
 
-// 2. Fetch Dashboard Data (KPIs + Progress Table)
+// ── 2. Fetch Dashboard Data (KPIs + Progress Table) ─────────────────────────
 app.get('/api/dashboard', async (req, res) => {
   try {
-    // A. Fetch categories and tasks
-    const categories = await dbAll('SELECT * FROM categories');
+    const categories = await dbAll('SELECT * FROM categories ORDER BY id ASC');
     const tasks = await dbAll(`
       SELECT t.*, c.name as category_name 
       FROM tasks t 
-      JOIN categories c ON t.category_id = c.id
+      LEFT JOIN categories c ON t.category_id = c.id
+      ORDER BY t.id ASC
     `);
 
-    // B. Calculate dynamic KPIs
-    // Count Completed Nazalat
+    // Dynamic KPIs from sub_units
     const nazalatStats = await dbAll(`
       SELECT zone, status, COUNT(*) as count 
       FROM sub_units 
       GROUP BY zone, status
     `);
 
-    let completedA = 0, totalA = 37;
-    let completedB = 0, totalB = 38;
-    let completedC = 0, totalC = 38;
-
+    let completedA = 0, completedB = 0, completedC = 0;
     nazalatStats.forEach(stat => {
       if (stat.zone === 'Zone A' && stat.status === 'منجز') completedA = stat.count;
       if (stat.zone === 'Zone B' && stat.status === 'منجز') completedB = stat.count;
@@ -83,50 +112,41 @@ app.get('/api/dashboard', async (req, res) => {
 
     const totalCompletedNazalat = completedA + completedB + completedC;
     const totalNazalat = 113;
-    const nazalatProgressPercent = (totalCompletedNazalat / totalNazalat) * 100;
+    const nazalatProgressPercent = totalNazalat > 0 ? (totalCompletedNazalat / totalNazalat) * 100 : 0;
 
-    // Calculate applied marble pieces dynamically from database (direct sum of recorded applied quantities)
+    // Marble pieces sum from sub_units and marble_distribution
     const marbleRows = await dbAll('SELECT * FROM marble_distribution');
-    let computedTotalWhite = 0;
     let computedAppliedWhite = 0;
-    let computedTotalBrown = 0;
     let computedAppliedBrown = 0;
 
     marbleRows.forEach(item => {
-      const white = item.white_qty || 0;
-      const brown = item.brown_qty || 0;
-      computedTotalWhite += white;
-      computedTotalBrown += brown;
-      computedAppliedWhite += white;
-      computedAppliedBrown += brown;
+      computedAppliedWhite += (item.white_qty || 0);
+      computedAppliedBrown += (item.brown_qty || 0);
     });
 
     const totalAppliedMarble = computedAppliedWhite + computedAppliedBrown;
-    const totalMarbleCount = computedTotalWhite + computedTotalBrown;
 
-    // C. Calculate average project progress
-    // Average of the progress_percent of all tasks
+    // Overall Progress Calculation
     let sumProgress = 0;
     tasks.forEach(t => {
-      // If it's the dynamic task, use the calculated percent only if not manual
       if (t.name === 'تطبيك النزلات (محدث تلقائياً)' && t.is_manual === 0) {
         t.progress_percent = parseFloat(nazalatProgressPercent.toFixed(2));
         t.completed_quantity = totalCompletedNazalat;
       }
-      sumProgress += t.progress_percent;
+      sumProgress += (Number(t.progress_percent) || 0);
     });
-    const overallProgress = sumProgress / tasks.length;
+    const overallProgress = tasks.length > 0 ? (sumProgress / tasks.length) : 0;
 
     res.json({
       categories,
       tasks,
       kpis: {
-        total_marble_pieces: totalMarbleCount,
+        total_marble_pieces: totalAppliedMarble > 0 ? totalAppliedMarble : 10830,
         applied_marble_pieces: totalAppliedMarble,
         applied_white_marble: Math.round(computedAppliedWhite),
         applied_brown_marble: Math.round(computedAppliedBrown),
         overall_progress_percent: parseFloat(overallProgress.toFixed(2)),
-        skylight_progress_percent: 100.0, // Completed as per sheet details
+        skylight_progress_percent: 100.0,
         nazalat_total: totalNazalat,
         nazalat_completed: totalCompletedNazalat,
         nazalat_progress_percent: parseFloat(nazalatProgressPercent.toFixed(2))
@@ -138,7 +158,7 @@ app.get('/api/dashboard', async (req, res) => {
   }
 });
 
-// 3. Fetch Sub-Units / Detailed tracking logs
+// ── 3. Sub-Units (Nazalat Tracking) Endpoints ───────────────────────────────
 app.get('/api/nazalat', async (req, res) => {
   const { zone, status } = req.query;
 
@@ -158,7 +178,6 @@ app.get('/api/nazalat', async (req, res) => {
   if (conditions.length > 0) {
     query += ' WHERE ' + conditions.join(' AND ');
   }
-
   query += ' ORDER BY serial_number ASC';
 
   try {
@@ -166,17 +185,16 @@ app.get('/api/nazalat', async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Fetch nazalat error:', error);
-    res.status(500).json({ error: 'حدث خطأ أثناء جلب سجلات المتابعة.' });
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب سجلات النزلات.' });
   }
 });
 
-// 4. Toggle Nazala Status (Admin only)
+// Toggle status of a Nazala
 app.post('/api/nazalat/:id/toggle', async (req, res) => {
   const { id } = req.params;
   const { userName, userRole } = req.body;
 
   try {
-    // Get current status
     const item = await dbGet('SELECT status, task_id, code, zone FROM sub_units WHERE id = ?', [id]);
     if (!item) {
       return res.status(404).json({ error: 'النزلة المطلوبة غير موجودة.' });
@@ -185,28 +203,23 @@ app.post('/api/nazalat/:id/toggle', async (req, res) => {
     const newStatus = item.status === 'منجز' ? 'متبقي' : 'منجز';
     const notes = newStatus === 'منجز' ? 'مطابق لجرودات الموقع' : 'قيد التجهيز والعمل';
 
-    // Update status
     await dbRun('UPDATE sub_units SET status = ?, notes = ? WHERE id = ?', [newStatus, notes, id]);
 
-    // Recalculate parent task progress
-    const totalCountRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ?', [item.task_id]);
-    const completedCountRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ? AND status = ?', [item.task_id, 'منجز']);
+    if (item.task_id) {
+      const totalRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ?', [item.task_id]);
+      const doneRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ? AND status = ?', [item.task_id, 'منجز']);
+      const total = totalRow?.count || 1;
+      const completed = doneRow?.count || 0;
+      const progress = parseFloat(((completed / total) * 100).toFixed(2));
 
-    const total = totalCountRow.count;
-    const completed = completedCountRow.count;
-    const progress = (completed / total) * 100;
+      await dbRun(
+        'UPDATE tasks SET completed_quantity = ?, progress_percent = ? WHERE id = ?',
+        [completed, progress, item.task_id]
+      );
+    }
 
-    await dbRun(
-      'UPDATE tasks SET completed_quantity = ?, progress_percent = ? WHERE id = ?',
-      [completed, parseFloat(progress.toFixed(2)), item.task_id]
-    );
-
-    // Auto-log system message
     if (userName) {
-      const actionText = userName === 'المهندس المقيم' || userRole === 'admin'
-        ? `قام المهندس المقيم (${userName}) بتحديث حالة النزلة ${item.code} في ${item.zone} إلى: ${newStatus === 'منجز' ? 'منجزة (مكتملة)' : 'متبقية'}`
-        : `قام (${userName}) بتحديث حالة النزلة ${item.code} في ${item.zone} إلى: ${newStatus === 'منجز' ? 'منجزة (مكتملة)' : 'متبقية'}`;
-      
+      const actionText = `قام (${userName}) بتحديث حالة النزلة ${item.code} في ${item.zone} إلى: ${newStatus === 'منجز' ? 'منجزة (مكتملة)' : 'متبقية'}`;
       await dbRun(
         `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
          VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
@@ -214,20 +227,14 @@ app.post('/api/nazalat/:id/toggle', async (req, res) => {
       );
     }
 
-    res.json({
-      success: true,
-      id,
-      newStatus,
-      completed,
-      progress: parseFloat(progress.toFixed(2))
-    });
+    res.json({ success: true, id, newStatus });
   } catch (error) {
-    console.error('Toggle status error:', error);
+    console.error('Toggle nazala status error:', error);
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث حالة النزلة.' });
   }
 });
 
-// 4b. Update Nazala Details (Admin only)
+// Update details of a Nazala
 app.post('/api/nazalat/:id/details', async (req, res) => {
   const { id } = req.params;
   const { 
@@ -250,43 +257,32 @@ app.post('/api/nazalat/:id/details', async (req, res) => {
       return res.status(404).json({ error: 'النزلة المطلوبة غير موجودة.' });
     }
 
-    const notes = status === 'منجز' ? 'مطابق لجرودات الموقع' : 'قيد التجهيز والعمل';
+    const newStatus = status || item.status;
+    const notes = newStatus === 'منجز' ? 'مطابق لجرودات الموقع' : 'قيد التجهيز والعمل';
 
-    // Update details
     await dbRun(
-      'UPDATE sub_units SET white_marked = ?, white_extra = ?, white_applied = ?, white_date = ?, brown_marked = ?, brown_extra = ?, brown_applied = ?, brown_date = ?, status = ?, notes = ? WHERE id = ?', 
+      `UPDATE sub_units SET 
+        white_marked = ?, white_extra = ?, white_applied = ?, white_date = ?, 
+        brown_marked = ?, brown_extra = ?, brown_applied = ?, brown_date = ?, 
+        status = ?, notes = ? 
+       WHERE id = ?`, 
       [
-        white_marked || 0,
-        white_extra || 0,
-        white_applied || 0,
+        Number(white_marked) || 0,
+        Number(white_extra) || 0,
+        Number(white_applied) || 0,
         white_date || '',
-        brown_marked || 0,
-        brown_extra || 0,
-        brown_applied || 0,
+        Number(brown_marked) || 0,
+        Number(brown_extra) || 0,
+        Number(brown_applied) || 0,
         brown_date || '',
-        status || item.status, 
+        newStatus, 
         notes, 
         id
       ]
     );
 
-    // Recalculate parent task progress
-    const totalCountRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ?', [item.task_id]);
-    const completedCountRow = await dbGet('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ? AND status = ?', [item.task_id, 'منجز']);
-
-    const total = totalCountRow.count;
-    const completed = completedCountRow.count;
-    const progress = total > 0 ? (completed / total) * 100 : 0;
-
-    await dbRun(
-      'UPDATE tasks SET completed_quantity = ?, progress_percent = ? WHERE id = ?',
-      [completed, parseFloat(progress.toFixed(2)), item.task_id]
-    );
-
-    // Auto-log system message
     if (userName) {
-      const actionText = `قام (${userName}) بتحديث تفاصيل النزلة ${item.code} في ${item.zone}. (الأبيض المطبق: ${white_applied || 0}، الجوزي المطبق: ${brown_applied || 0}، الحالة: ${status || item.status})`;
-      
+      const actionText = `قام (${userName}) بتحديث تفاصيل النزلة ${item.code} (${item.zone}) - الأبيض المطبق: ${white_applied || 0}، الجوزي المطبق: ${brown_applied || 0}، الحالة: ${newStatus}`;
       await dbRun(
         `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
          VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
@@ -294,20 +290,14 @@ app.post('/api/nazalat/:id/details', async (req, res) => {
       );
     }
 
-    res.json({
-      success: true,
-      id,
-      status: status || item.status,
-      completed,
-      progress: parseFloat(progress.toFixed(2))
-    });
+    res.json({ success: true, id, status: newStatus });
   } catch (error) {
-    console.error('Update details error:', error);
+    console.error('Update nazala details error:', error);
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث تفاصيل النزلة.' });
   }
 });
 
-// 5. Update Manual Task Progress (Admin only)
+// ── 4. Task Progress & Notes Endpoints ──────────────────────────────────────
 app.post('/api/tasks/:id/progress', async (req, res) => {
   const { id } = req.params;
   const { completed_quantity, progress_percent, notes, userName, userRole } = req.body;
@@ -318,42 +308,23 @@ app.post('/api/tasks/:id/progress', async (req, res) => {
       return res.status(404).json({ error: 'الفقرة المطلوبة غير موجودة.' });
     }
 
-    let progress = 0;
-    let completed = null;
+    let progress = task.progress_percent;
+    let completed = task.completed_quantity;
 
     if (task.total_quantity !== null && task.total_quantity > 0) {
       if (completed_quantity !== undefined) {
-        completed = parseFloat(completed_quantity);
-        if (isNaN(completed) || completed < 0) {
-          return res.status(400).json({ error: 'الكمية المنجزة يجب أن تكون رقماً موجباً.' });
-        }
-        if (completed > task.total_quantity) {
-          completed = task.total_quantity;
-        }
+        completed = Math.min(Math.max(0, parseFloat(completed_quantity) || 0), task.total_quantity);
         progress = parseFloat(((completed / task.total_quantity) * 100).toFixed(2));
       } else if (progress_percent !== undefined) {
-        progress = parseFloat(progress_percent);
-        if (isNaN(progress) || progress < 0 || progress > 100) {
-          return res.status(400).json({ error: 'نسبة الإنجاز يجب أن تكون بين 0 و 100.' });
-        }
+        progress = Math.min(Math.max(0, parseFloat(progress_percent) || 0), 100);
         completed = parseFloat((task.total_quantity * (progress / 100)).toFixed(2));
-      } else {
-        progress = task.progress_percent;
-        completed = task.completed_quantity;
       }
     } else {
       if (progress_percent !== undefined) {
-        progress = parseFloat(progress_percent);
-        if (isNaN(progress) || progress < 0 || progress > 100) {
-          return res.status(400).json({ error: 'نسبة الإنجاز يجب أن تكون بين 0 و 100.' });
-        }
-      } else {
-        progress = task.progress_percent;
+        progress = Math.min(Math.max(0, parseFloat(progress_percent) || 0), 100);
       }
-      completed = null;
     }
 
-    // Build update query
     let query = 'UPDATE tasks SET progress_percent = ?, completed_quantity = ?';
     const params = [progress, completed];
 
@@ -361,16 +332,13 @@ app.post('/api/tasks/:id/progress', async (req, res) => {
       query += ', notes = ?';
       params.push(notes);
     }
-
     query += ' WHERE id = ?';
     params.push(id);
 
     await dbRun(query, params);
 
-    // Auto-log system message
     if (userName) {
-      const actionText = `قام المهندس المقيم (${userName}) بتحديث تقدّم الفقرة "${task.name}" إلى: ${progress}% (الكمية المنجزة الحالية: ${completed || 0} من أصل ${task.total_quantity || '-'})` + (notes ? ` | ملاحظات الموقع: "${notes}"` : '');
-      
+      const actionText = `قام (${userName}) بتحديث تقدم فقرة "${task.name}" إلى ${progress}%` + (notes ? ` (ملاحظات: ${notes})` : '');
       await dbRun(
         `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
          VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
@@ -378,20 +346,13 @@ app.post('/api/tasks/:id/progress', async (req, res) => {
       );
     }
 
-    res.json({
-      success: true,
-      id,
-      progress_percent: progress,
-      completed_quantity: completed,
-      notes
-    });
+    res.json({ success: true, id, progress_percent: progress, completed_quantity: completed, notes });
   } catch (error) {
-    console.error('Update progress error:', error);
-    res.status(500).json({ error: 'حدث خطأ أثناء تحديث البيانات.' });
+    console.error('Update task progress error:', error);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث بيانات الفقرة.' });
   }
 });
 
-// 6. Update Task Notes (Admin only)
 app.post('/api/tasks/:id/notes', async (req, res) => {
   const { id } = req.params;
   const { notes } = req.body;
@@ -400,26 +361,25 @@ app.post('/api/tasks/:id/notes', async (req, res) => {
     await dbRun('UPDATE tasks SET notes = ? WHERE id = ?', [notes, id]);
     res.json({ success: true, id, notes });
   } catch (error) {
-    console.error('Update notes error:', error);
+    console.error('Update task notes error:', error);
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث الملاحظات.' });
   }
 });
 
-// 7. Fetch Marble Distribution
+// ── 5. Marble Distribution Endpoints ────────────────────────────────────────
 app.get('/api/marble', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT * FROM marble_distribution');
+    const rows = await dbAll('SELECT * FROM marble_distribution ORDER BY id ASC');
     res.json(rows);
   } catch (error) {
-    console.error('Fetch marble distribution error:', error);
-    res.status(500).json({ error: 'حدث خطأ أثناء جلب بيانات توزيع المرمر.' });
+    console.error('Fetch marble error:', error);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب توزيع المرمر.' });
   }
 });
 
-// 8. Update Marble Status & Quantities (Admin only)
 app.post('/api/marble/:id/status', async (req, res) => {
   const { id } = req.params;
-  const { status, white_qty, brown_qty, userName, userRole } = req.body;
+  const { status, white_qty, brown_qty, userName } = req.body;
 
   try {
     const whiteVal = white_qty === undefined || white_qty === null ? null : parseInt(white_qty, 10);
@@ -430,12 +390,10 @@ app.post('/api/marble/:id/status', async (req, res) => {
       [status, whiteVal, brownVal, id]
     );
 
-    // Auto-log system message
     if (userName) {
       const item = await dbGet('SELECT * FROM marble_distribution WHERE id = ?', [id]);
       if (item) {
-        const actionText = `قام المهندس المقيم (${userName}) بتحديث تفاصيل مرمر "${item.task_name}" في "${item.zone}": الأبيض=${whiteVal !== null ? whiteVal : '-'}، الجوزي=${brownVal !== null ? brownVal : '-'} | الحالة: "${status}"`;
-        
+        const actionText = `قام (${userName}) بتحديث موقف مرمر "${item.task_name}" (${item.zone}) - الأبيض: ${whiteVal ?? '-'}، الجوزي: ${brownVal ?? '-'} | الحالة: "${status}"`;
         await dbRun(
           `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
            VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
@@ -446,17 +404,15 @@ app.post('/api/marble/:id/status', async (req, res) => {
 
     res.json({ success: true, id, status, white_qty: whiteVal, brown_qty: brownVal });
   } catch (error) {
-    console.error('Update marble status error:', error);
-    res.status(500).json({ error: 'حدث خطأ أثناء تحديث الموقف الميداني للمرمر.' });
+    console.error('Update marble error:', error);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث موقف المرمر.' });
   }
 });
 
-// ── Daily Updates / Chat API Endpoints ──
-
-// A. Fetch all daily updates and logs
+// ── 6. Daily Updates / Chat API Endpoints ───────────────────────────────────
 app.get('/api/daily-updates', async (req, res) => {
   try {
-    const rows = await dbAll(`
+    const rows = await sqliteAll(`
       SELECT d.*, u.name as user_name, u.role as user_role,
              r.sender_name as reply_sender_name, r.message_text as reply_message_text, r.media_url as reply_media_url, r.media_type as reply_media_type
       FROM daily_updates d
@@ -471,12 +427,11 @@ app.get('/api/daily-updates', async (req, res) => {
   }
 });
 
-// B. Post a new message or upload media
 app.post('/api/daily-updates', async (req, res) => {
   const { user_id, sender_name, sender_role, message_text, media_data, media_name, reply_to_id } = req.body;
 
   if (!message_text && !media_data) {
-    return res.status(400).json({ error: 'محتوى الرسالة مطلوب.' });
+    return res.status(400).json({ error: 'محتوى الرسالة أو المرفق مطلوب.' });
   }
 
   try {
@@ -484,7 +439,6 @@ app.post('/api/daily-updates', async (req, res) => {
     let media_type = null;
 
     if (media_data) {
-      // Decode base64 file
       let buffer;
       let extension = 'bin';
 
@@ -493,7 +447,6 @@ app.post('/api/daily-updates', async (req, res) => {
         const mimeType = parts[0].replace('data:', '');
         buffer = Buffer.from(parts[1], 'base64');
         
-        // Guess extension from mime type
         if (mimeType.includes('image')) {
           media_type = 'image';
           extension = (mimeType.split('/')[1] || '').split(';')[0] || 'png';
@@ -505,17 +458,12 @@ app.post('/api/daily-updates', async (req, res) => {
           extension = (mimeType.split('/')[1] || '').split(';')[0] || 'webm';
         }
       } else {
-        // Fallback: direct base64 string
         buffer = Buffer.from(media_data, 'base64');
         if (media_name) {
           const ext = media_name.split('.').pop().toLowerCase();
           extension = ext;
           if (['mp4', 'webm', 'mov', 'ogg'].includes(ext)) {
-            if (media_name.startsWith('voice_')) {
-              media_type = 'audio';
-            } else {
-              media_type = 'video';
-            }
+            media_type = media_name.startsWith('voice_') ? 'audio' : 'video';
           } else if (['mp3', 'wav', 'm4a', 'aac', 'opus', 'caf'].includes(ext)) {
             media_type = 'audio';
           } else {
@@ -530,15 +478,13 @@ app.post('/api/daily-updates', async (req, res) => {
       media_url = `/api/uploads/${filename}`;
     }
 
-    // Insert message
     const result = await dbRun(
       `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [user_id || null, sender_name, sender_role, message_text || '', media_url, media_type, reply_to_id || null]
     );
 
-    // Fetch the inserted message to return
-    const newMessage = await dbGet(`
+    const newMessage = await sqliteGet(`
       SELECT d.*, u.name as user_name, u.role as user_role,
              r.sender_name as reply_sender_name, r.message_text as reply_message_text, r.media_url as reply_media_url, r.media_type as reply_media_type
       FROM daily_updates d
@@ -554,317 +500,203 @@ app.post('/api/daily-updates', async (req, res) => {
   }
 });
 
-// ── Materials Consumption Tracking API Endpoints ──
-
-const consumptionFilePath = path.join(__dirname, 'data', 'materials_consumption.json');
-
-const readConsumptionData = () => {
-  try {
-    if (!fs.existsSync(consumptionFilePath)) {
-      return [];
-    }
-    const data = fs.readFileSync(consumptionFilePath, 'utf8');
-    return JSON.parse(data || '[]');
-  } catch (err) {
-    console.error('Error reading materials consumption file:', err);
-    return [];
-  }
-};
-
-const writeConsumptionData = (data) => {
-  try {
-    const dataDir = path.dirname(consumptionFilePath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    fs.writeFileSync(consumptionFilePath, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error('Error writing materials consumption file:', err);
-    return false;
-  }
-};
-
-// GET all reports
+// ── 7. Materials Consumption API Endpoints ──────────────────────────────────
 app.get('/api/materials-consumption', async (req, res) => {
   try {
-    const { data, error } = await db
-      .from('materials_consumption')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (error) {
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.warn('Table "materials_consumption" does not exist in Supabase. Falling back to JSON file.');
-        throw new Error('FALLBACK');
-      }
-      throw error;
-    }
-
-    res.json(data);
+    const rows = await sqliteAll('SELECT * FROM materials_consumption ORDER BY date DESC, created_at DESC');
+    const parsed = rows.map(r => ({
+      ...r,
+      basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : r.basics,
+      marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : r.marble,
+      sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : r.sealants,
+      bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : r.bulk,
+    }));
+    res.json(parsed);
   } catch (err) {
-    const data = readConsumptionData();
-    data.sort((a, b) => new Date(b.date + 'T' + (b.start_time || '00:00')) - new Date(a.date + 'T' + (a.start_time || '00:00')));
+    console.warn('SQLite materials consumption query fallback to JSON:', err.message);
+    const data = getJsonFallback('materials_consumption.json', []);
     res.json(data);
   }
 });
 
-// POST a new report
 app.post('/api/materials-consumption', async (req, res) => {
   const report = req.body;
   if (!report.date || !report.day || !report.prepared_by) {
-    return res.status(400).json({ error: 'Missing required report fields' });
+    return res.status(400).json({ error: 'الحقول الأساسية للتاريخ والمعد مطلوبة.' });
   }
 
+  const id = report.id || Date.now().toString();
+  const createdAt = new Date().toISOString();
+
   try {
-    const newReport = {
-      id: Date.now().toString(),
-      date: report.date,
-      day: report.day,
-      start_time: report.start_time,
-      end_time: report.end_time,
-      prepared_by: report.prepared_by,
-      basics: report.basics,
-      marble: report.marble,
-      sealants: report.sealants,
-      bulk: report.bulk,
-      notes: report.notes,
-      created_at: new Date().toISOString()
-    };
+    await sqliteRun(`
+      INSERT INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      id,
+      report.date,
+      report.day,
+      report.start_time || '08:00',
+      report.end_time || '17:00',
+      report.prepared_by,
+      JSON.stringify(report.basics || {}),
+      JSON.stringify(report.marble || {}),
+      JSON.stringify(report.sealants || {}),
+      JSON.stringify(report.bulk || {}),
+      report.notes || '',
+      createdAt
+    ]);
 
-    const { data, error } = await db
-      .from('materials_consumption')
-      .insert([newReport])
-      .select()
-      .single();
+    // Save JSON fallback sync
+    const jsonList = getJsonFallback('materials_consumption.json', []);
+    jsonList.unshift({ ...report, id, created_at: createdAt });
+    saveJsonFallback('materials_consumption.json', jsonList);
 
-    if (error) {
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.warn('Table "materials_consumption" does not exist in Supabase. Falling back to JSON file.');
-        throw new Error('FALLBACK');
+    // Sync Supabase if available
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('materials_consumption').insert([{
+          id,
+          date: report.date,
+          day: report.day,
+          start_time: report.start_time,
+          end_time: report.end_time,
+          prepared_by: report.prepared_by,
+          basics: report.basics,
+          marble: report.marble,
+          sealants: report.sealants,
+          bulk: report.bulk,
+          notes: report.notes,
+          created_at: createdAt
+        }]);
+      } catch (e) {
+        console.warn('Supabase consumption sync skipped:', e.message);
       }
-      throw error;
     }
 
-    res.status(201).json(data);
+    res.status(201).json({ ...report, id, created_at: createdAt });
   } catch (err) {
-    const data = readConsumptionData();
-    const newReport = {
-      ...report,
-      id: Date.now().toString(),
-      created_at: new Date().toISOString()
-    };
-    data.push(newReport);
-    if (writeConsumptionData(data)) {
-      res.status(201).json(newReport);
-    } else {
-      res.status(500).json({ error: 'Failed to write consumption report data' });
-    }
+    console.error('Create consumption error:', err);
+    res.status(500).json({ error: 'فشل حفظ تقرير استهلاك المواد.' });
   }
 });
 
-// PUT (update) an existing report
 app.put('/api/materials-consumption/:id', async (req, res) => {
   const { id } = req.params;
-  const updatedReport = req.body;
+  const report = req.body;
+  const updatedAt = new Date().toISOString();
 
   try {
-    const { data, error } = await db
-      .from('materials_consumption')
-      .update({
-        date: updatedReport.date,
-        day: updatedReport.day,
-        start_time: updatedReport.start_time,
-        end_time: updatedReport.end_time,
-        prepared_by: updatedReport.prepared_by,
-        basics: updatedReport.basics,
-        marble: updatedReport.marble,
-        sealants: updatedReport.sealants,
-        bulk: updatedReport.bulk,
-        notes: updatedReport.notes
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    await sqliteRun(`
+      UPDATE materials_consumption SET
+        date = ?, day = ?, start_time = ?, end_time = ?, prepared_by = ?,
+        basics = ?, marble = ?, sealants = ?, bulk = ?, notes = ?, updated_at = ?
+      WHERE id = ?
+    `, [
+      report.date,
+      report.day,
+      report.start_time,
+      report.end_time,
+      report.prepared_by,
+      JSON.stringify(report.basics || {}),
+      JSON.stringify(report.marble || {}),
+      JSON.stringify(report.sealants || {}),
+      JSON.stringify(report.bulk || {}),
+      report.notes || '',
+      updatedAt,
+      id
+    ]);
 
-    if (error) {
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.warn('Table "materials_consumption" does not exist in Supabase. Falling back to JSON file.');
-        throw new Error('FALLBACK');
-      }
-      throw error;
+    const jsonList = getJsonFallback('materials_consumption.json', []);
+    const idx = jsonList.findIndex(item => String(item.id) === String(id));
+    if (idx !== -1) {
+      jsonList[idx] = { ...jsonList[idx], ...report, updated_at: updatedAt };
+      saveJsonFallback('materials_consumption.json', jsonList);
     }
 
-    res.json(data);
+    res.json({ ...report, id, updated_at: updatedAt });
   } catch (err) {
-    const data = readConsumptionData();
-    const index = data.findIndex(item => item.id === id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-    
-    data[index] = {
-      ...data[index],
-      ...updatedReport,
-      updated_at: new Date().toISOString()
-    };
-    
-    if (writeConsumptionData(data)) {
-      res.json(data[index]);
-    } else {
-      res.status(500).json({ error: 'Failed to update consumption report data' });
-    }
+    console.error('Update consumption error:', err);
+    res.status(500).json({ error: 'فشل تحديث تقرير استهلاك المواد.' });
   }
 });
 
-// DELETE a report
 app.delete('/api/materials-consumption/:id', async (req, res) => {
   const { id } = req.params;
-
   try {
-    const { error } = await db
-      .from('materials_consumption')
-      .delete()
-      .eq('id', id);
+    await sqliteRun('DELETE FROM materials_consumption WHERE id = ?', [id]);
 
-    if (error) {
-      if (error.code === '42P01' || error.message.includes('does not exist')) {
-        console.warn('Table "materials_consumption" does not exist in Supabase. Falling back to JSON file.');
-        throw new Error('FALLBACK');
-      }
-      throw error;
-    }
+    const jsonList = getJsonFallback('materials_consumption.json', []);
+    const filtered = jsonList.filter(item => String(item.id) !== String(id));
+    saveJsonFallback('materials_consumption.json', filtered);
 
-    // Keep JSON fallback file in sync
-    const data = readConsumptionData();
-    const index = data.findIndex(item => item.id === id);
-    if (index !== -1) {
-      data.splice(index, 1);
-      writeConsumptionData(data);
+    if (isSupabaseActive()) {
+      try { await supabase.from('materials_consumption').delete().eq('id', id); } catch {}
     }
 
     res.json({ success: true });
   } catch (err) {
-    const data = readConsumptionData();
-    const index = data.findIndex(item => item.id === id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-    
-    data.splice(index, 1);
-    if (writeConsumptionData(data)) {
-      res.json({ success: true });
-    } else {
-      res.status(500).json({ error: 'Failed to delete consumption report data' });
-    }
+    console.error('Delete consumption error:', err);
+    res.status(500).json({ error: 'فشل حذف تقرير الاستهلاك.' });
   }
 });
 
-// ── Workers Wages API Endpoints ──
-
-const wagesFilePath = path.join(__dirname, 'data', 'workers_wages.json');
-
-const readWagesData = () => {
-  try {
-    if (!fs.existsSync(wagesFilePath)) return [];
-    const data = fs.readFileSync(wagesFilePath, 'utf8');
-    return JSON.parse(data || '[]');
-  } catch (err) {
-    console.error('Error reading workers wages file:', err);
-    return [];
-  }
-};
-
-const writeWagesData = (data) => {
-  try {
-    const dataDir = path.dirname(wagesFilePath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    fs.writeFileSync(wagesFilePath, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error('Error writing workers wages file:', err);
-    return false;
-  }
-};
-
-// GET all wages
+// ── 8. Workers Wages API Endpoints ──────────────────────────────────────────
 app.get('/api/workers-wages', async (req, res) => {
   try {
-    const { data, error } = await db
-      .from('workers_wages')
-      .select('*')
-      .order('work_date', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
+    const rows = await sqliteAll('SELECT * FROM workers_wages ORDER BY work_date DESC, created_at DESC');
+    res.json(rows);
   } catch (err) {
-    const data = readWagesData();
-    data.sort((a, b) => new Date(b.work_date) - new Date(a.work_date));
+    const data = getJsonFallback('workers_wages.json', []);
     res.json(data);
   }
 });
 
-// POST a new wage record
 app.post('/api/workers-wages', async (req, res) => {
   const record = req.body;
   if (!record.work_date || !record.work_item) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: 'تاريخ العمل والفقرة مطلوبة.' });
   }
 
+  const id = record.id || Date.now().toString();
   const shiftsCount = Number(record.shifts_count) || 1;
   const shiftPrice = Number(record.shift_price) || 0;
   const totalAmount = shiftsCount * shiftPrice;
+  const createdAt = new Date().toISOString();
+
+  const newWage = {
+    id,
+    work_date: record.work_date,
+    work_item: record.work_item,
+    worker_name: record.worker_name || 'عمال ابو حيدر',
+    shifts_count: shiftsCount,
+    shift_price: shiftPrice,
+    total_amount: totalAmount,
+    notes: record.notes || '',
+    created_at: createdAt
+  };
 
   try {
-    const newRecord = {
-      work_date: record.work_date,
-      work_item: record.work_item,
-      worker_name: record.worker_name || 'عمال ابو حيدر',
-      shifts_count: shiftsCount,
-      shift_price: shiftPrice,
-      total_amount: totalAmount,
-      notes: record.notes || '',
-      created_at: new Date().toISOString()
-    };
+    await sqliteRun(`
+      INSERT INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, notes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [newWage.id, newWage.work_date, newWage.work_item, newWage.worker_name, newWage.shifts_count, newWage.shift_price, newWage.total_amount, newWage.notes, newWage.created_at]);
 
-    const { data, error } = await db
-      .from('workers_wages')
-      .insert([newRecord])
-      .select()
-      .single();
+    const jsonList = getJsonFallback('workers_wages.json', []);
+    jsonList.unshift(newWage);
+    saveJsonFallback('workers_wages.json', jsonList);
 
-    if (error) throw error;
-
-    const fallbackData = readWagesData();
-    fallbackData.unshift(data);
-    writeWagesData(fallbackData);
-
-    res.status(201).json(data);
-  } catch (err) {
-    const fallbackData = readWagesData();
-    const newRecord = {
-      id: Date.now().toString(),
-      work_date: record.work_date,
-      work_item: record.work_item,
-      worker_name: record.worker_name || 'عمال ابو حيدر',
-      shifts_count: shiftsCount,
-      shift_price: shiftPrice,
-      total_amount: totalAmount,
-      notes: record.notes || '',
-      created_at: new Date().toISOString()
-    };
-    fallbackData.unshift(newRecord);
-    if (writeWagesData(fallbackData)) {
-      res.status(201).json(newRecord);
-    } else {
-      res.status(500).json({ error: 'Failed to write wage record' });
+    if (isSupabaseActive()) {
+      try { await supabase.from('workers_wages').insert([newWage]); } catch {}
     }
+
+    res.status(201).json(newWage);
+  } catch (err) {
+    console.error('Create wage error:', err);
+    res.status(500).json({ error: 'فشل إضافة سجل الأجور.' });
   }
 });
 
-// PUT (update) a wage record
 app.put('/api/workers-wages/:id', async (req, res) => {
   const { id } = req.params;
   const record = req.body;
@@ -873,149 +705,262 @@ app.put('/api/workers-wages/:id', async (req, res) => {
   const totalAmount = shiftsCount * shiftPrice;
 
   try {
-    const { data, error } = await db
-      .from('workers_wages')
-      .update({
-        work_date: record.work_date,
-        work_item: record.work_item,
-        worker_name: record.worker_name,
-        shifts_count: shiftsCount,
-        shift_price: shiftPrice,
-        total_amount: totalAmount,
-        notes: record.notes
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    await sqliteRun(`
+      UPDATE workers_wages SET
+        work_date = ?, work_item = ?, worker_name = ?, shifts_count = ?,
+        shift_price = ?, total_amount = ?, notes = ?
+      WHERE id = ?
+    `, [record.work_date, record.work_item, record.worker_name, shiftsCount, shiftPrice, totalAmount, record.notes || '', id]);
 
-    if (error) throw error;
+    const jsonList = getJsonFallback('workers_wages.json', []);
+    const idx = jsonList.findIndex(item => String(item.id) === String(id));
+    if (idx !== -1) {
+      jsonList[idx] = { ...jsonList[idx], ...record, shifts_count: shiftsCount, shift_price: shiftPrice, total_amount: totalAmount };
+      saveJsonFallback('workers_wages.json', jsonList);
+    }
 
-    res.json(data);
+    res.json({ ...record, id, total_amount: totalAmount });
   } catch (err) {
-    const data = readWagesData();
-    const index = data.findIndex(item => String(item.id) === String(id));
-    if (index === -1) {
-      return res.status(404).json({ error: 'Record not found' });
-    }
-    data[index] = {
-      ...data[index],
-      work_date: record.work_date,
-      work_item: record.work_item,
-      worker_name: record.worker_name,
-      shifts_count: shiftsCount,
-      shift_price: shiftPrice,
-      total_amount: totalAmount,
-      notes: record.notes
-    };
-    if (writeWagesData(data)) {
-      res.json(data[index]);
-    } else {
-      res.status(500).json({ error: 'Failed to update wage record' });
-    }
+    console.error('Update wage error:', err);
+    res.status(500).json({ error: 'فشل تعديل سجل الأجور.' });
   }
 });
 
-// DELETE a wage record
 app.delete('/api/workers-wages/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const { error } = await db
-      .from('workers_wages')
-      .delete()
-      .eq('id', id);
+    await sqliteRun('DELETE FROM workers_wages WHERE id = ?', [id]);
 
-    if (error) throw error;
+    const jsonList = getJsonFallback('workers_wages.json', []);
+    const filtered = jsonList.filter(item => String(item.id) !== String(id));
+    saveJsonFallback('workers_wages.json', filtered);
 
-    const data = readWagesData();
-    const index = data.findIndex(item => String(item.id) === String(id));
-    if (index !== -1) {
-      data.splice(index, 1);
-      writeWagesData(data);
+    if (isSupabaseActive()) {
+      try { await supabase.from('workers_wages').delete().eq('id', id); } catch {}
     }
+
     res.json({ success: true });
   } catch (err) {
-    const data = readWagesData();
-    const index = data.findIndex(item => String(item.id) === String(id));
-    if (index === -1) {
-      return res.status(404).json({ error: 'Record not found' });
-    }
-    data.splice(index, 1);
-    if (writeWagesData(data)) {
-      res.json({ success: true });
-    } else {
-      res.status(500).json({ error: 'Failed to delete record' });
-    }
+    console.error('Delete wage error:', err);
+    res.status(500).json({ error: 'فشل حذف سجل الأجور.' });
   }
 });
 
-// ── User Management API Endpoints ──
+// ── 9. Weekly Advance API Endpoints ─────────────────────────────────────────
+app.get('/api/weekly-advance', async (req, res) => {
+  try {
+    const rows = await sqliteAll('SELECT * FROM weekly_advance ORDER BY receipt_date DESC, created_at DESC');
+    const parsed = rows.map(r => ({
+      ...r,
+      data: typeof r.data === 'string' ? JSON.parse(r.data || '{}') : r.data
+    }));
+    res.json(parsed);
+  } catch (err) {
+    const data = getJsonFallback('weekly_advance.json', []);
+    res.json(data);
+  }
+});
 
-// GET all users
+app.get('/api/weekly-advance/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const row = await sqliteGet('SELECT * FROM weekly_advance WHERE id = ?', [id]);
+    if (!row) {
+      return res.status(404).json({ error: 'السجل غير موجود.' });
+    }
+    row.data = typeof row.data === 'string' ? JSON.parse(row.data || '{}') : row.data;
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: 'فشل جلب تفاصيل السلفة.' });
+  }
+});
+
+app.post('/api/weekly-advance', async (req, res) => {
+  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
+  const id = Date.now().toString();
+  const createdAt = new Date().toISOString();
+
+  const newRec = {
+    id,
+    receipt_date: receipt_date || new Date().toISOString().split('T')[0],
+    team_leader: team_leader || '',
+    site_name: site_name || 'موقع النصب التذكاري للجندي المجهول',
+    team_number: team_number || '',
+    data: formData || {},
+    created_at: createdAt
+  };
+
+  try {
+    await sqliteRun(`
+      INSERT INTO weekly_advance (id, receipt_date, team_leader, site_name, team_number, data, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [id, newRec.receipt_date, newRec.team_leader, newRec.site_name, newRec.team_number, JSON.stringify(newRec.data), createdAt]);
+
+    const jsonList = getJsonFallback('weekly_advance.json', []);
+    jsonList.unshift(newRec);
+    saveJsonFallback('weekly_advance.json', jsonList);
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('weekly_advance').insert([{
+          id,
+          receipt_date: newRec.receipt_date,
+          team_leader: newRec.team_leader,
+          site_name: newRec.site_name,
+          team_number: newRec.team_number,
+          data: newRec.data
+        }]);
+      } catch {}
+    }
+
+    res.status(201).json(newRec);
+  } catch (err) {
+    console.error('Create weekly advance error:', err);
+    res.status(500).json({ error: 'فشل حفظ سجل السلفة.' });
+  }
+});
+
+app.put('/api/weekly-advance/:id', async (req, res) => {
+  const { id } = req.params;
+  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
+  const updatedAt = new Date().toISOString();
+
+  try {
+    await sqliteRun(`
+      UPDATE weekly_advance SET
+        receipt_date = ?, team_leader = ?, site_name = ?, team_number = ?, data = ?, updated_at = ?
+      WHERE id = ?
+    `, [receipt_date, team_leader, site_name, team_number, JSON.stringify(formData || {}), updatedAt, id]);
+
+    const jsonList = getJsonFallback('weekly_advance.json', []);
+    const idx = jsonList.findIndex(item => String(item.id) === String(id));
+    if (idx !== -1) {
+      jsonList[idx] = { ...jsonList[idx], receipt_date, team_leader, site_name, team_number, data: formData, updated_at: updatedAt };
+      saveJsonFallback('weekly_advance.json', jsonList);
+    }
+
+    res.json({ id, receipt_date, team_leader, site_name, team_number, data: formData, updated_at: updatedAt });
+  } catch (err) {
+    console.error('Update weekly advance error:', err);
+    res.status(500).json({ error: 'فشل تعديل سجل السلفة.' });
+  }
+});
+
+app.delete('/api/weekly-advance/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sqliteRun('DELETE FROM weekly_advance WHERE id = ?', [id]);
+
+    const jsonList = getJsonFallback('weekly_advance.json', []);
+    const filtered = jsonList.filter(item => String(item.id) !== String(id));
+    saveJsonFallback('weekly_advance.json', filtered);
+
+    if (isSupabaseActive()) {
+      try { await supabase.from('weekly_advance').delete().eq('id', id); } catch {}
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete weekly advance error:', err);
+    res.status(500).json({ error: 'فشل حذف سجل السلفة.' });
+  }
+});
+
+// ── 10. Users Management API Endpoints ──────────────────────────────────────
 app.get('/api/users', async (req, res) => {
   try {
-    const { data, error } = await db
-      .from('users')
-      .select('id, email, name, role, password')
-      .order('id', { ascending: true });
-    if (error) throw error;
-    res.json(data);
+    const rows = await sqliteAll('SELECT id, email, name, role, password, created_at FROM users ORDER BY id ASC');
+    res.json(rows);
   } catch (err) {
     console.error('Fetch users error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء جلب قائمة المستخدمين.' });
   }
 });
 
-// POST a new user
 app.post('/api/users', async (req, res) => {
   const { email, password, name, role } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ error: 'جميع الحقول مطلوبة.' });
   }
+
   try {
-    const { data, error } = await db
-      .from('users')
-      .insert([{ email, password, name, role }])
-      .select()
-      .single();
-    if (error) throw error;
-    res.status(201).json(data);
+    const existing = await sqliteGet('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email.trim()]);
+    if (existing) {
+      return res.status(400).json({ error: 'البريد الإلكتروني مستخدم بالفعل.' });
+    }
+
+    const result = await sqliteRun(
+      'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
+      [email.trim().toLowerCase(), password, name.trim(), role]
+    );
+
+    const newUser = {
+      id: result.id,
+      email: email.trim().toLowerCase(),
+      name: name.trim(),
+      role,
+      password
+    };
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('users').insert([newUser]);
+      } catch (e) {
+        console.warn('Supabase user insert skipped:', e.message);
+      }
+    }
+
+    res.status(201).json(newUser);
   } catch (err) {
     console.error('Create user error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء إنشاء الحساب.' });
   }
 });
 
-// PUT (update) a user
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { email, password, name, role } = req.body;
-  if (!email || !password || !name || !role) {
-    return res.status(400).json({ error: 'جميع الحقول مطلوبة.' });
+  if (!email || !name || !role) {
+    return res.status(400).json({ error: 'البريد الإلكتروني والاسم والدور مطلوبة.' });
   }
+
   try {
-    const { data, error } = await db
-      .from('users')
-      .update({ email, password, name, role })
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    res.json(data);
+    if (password) {
+      await sqliteRun(
+        'UPDATE users SET email = ?, password = ?, name = ?, role = ? WHERE id = ?',
+        [email.trim().toLowerCase(), password, name.trim(), role, id]
+      );
+    } else {
+      await sqliteRun(
+        'UPDATE users SET email = ?, name = ?, role = ? WHERE id = ?',
+        [email.trim().toLowerCase(), name.trim(), role, id]
+      );
+    }
+
+    if (isSupabaseActive()) {
+      try {
+        const updateObj = { email: email.trim().toLowerCase(), name: name.trim(), role };
+        if (password) updateObj.password = password;
+        await supabase.from('users').update(updateObj).eq('id', id);
+      } catch {}
+    }
+
+    res.json({ id, email: email.trim().toLowerCase(), name: name.trim(), role });
   } catch (err) {
     console.error('Update user error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث الحساب.' });
   }
 });
 
-// DELETE a user
 app.delete('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const { error } = await db
-      .from('users')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
+    await sqliteRun('DELETE FROM users WHERE id = ?', [id]);
+
+    if (isSupabaseActive()) {
+      try { await supabase.from('users').delete().eq('id', id); } catch {}
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error('Delete user error:', err);
@@ -1023,120 +968,22 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
-
-// ─── Weekly Advance (تسمية السلفة الأسبوعية) ────────────────────────────────
-
-// GET all
-app.get('/api/weekly-advance', async (req, res) => {
-  try {
-    const { data, error } = await db
-      .from('weekly_advance')
-      .select('*')
-      .order('receipt_date', { ascending: false });
-    if (error) throw error;
-    res.json(data || []);
-  } catch (err) {
-    console.error('Get weekly-advance error:', err);
-    // Fallback to local JSON
-    try {
-      const fp = path.join(__dirname, 'data', 'weekly_advance.json');
-      if (fs.existsSync(fp)) {
-        res.json(JSON.parse(fs.readFileSync(fp, 'utf8')));
-      } else {
-        res.json([]);
-      }
-    } catch { res.json([]); }
-  }
-});
-
-// GET single
-app.get('/api/weekly-advance/:id', async (req, res) => {
-  try {
-    const { data, error } = await db
-      .from('weekly_advance')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(404).json({ error: 'السجل غير موجود.' });
-  }
-});
-
-// POST create
-app.post('/api/weekly-advance', async (req, res) => {
-  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
-  try {
-    const { data, error } = await db
-      .from('weekly_advance')
-      .insert([{ receipt_date, team_leader, site_name, team_number, data: formData }])
-      .select()
-      .single();
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (err) {
-    console.error('Create weekly-advance error:', err);
-    // Fallback: save to JSON
-    try {
-      const fp = path.join(__dirname, 'data', 'weekly_advance.json');
-      const existing = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf8')) : [];
-      const newRec = { id: Date.now(), receipt_date, team_leader, site_name, team_number, data: formData, created_at: new Date().toISOString() };
-      existing.unshift(newRec);
-      fs.writeFileSync(fp, JSON.stringify(existing, null, 2));
-      res.status(201).json(newRec);
-    } catch (e2) {
-      res.status(500).json({ error: 'فشل الحفظ.' });
-    }
-  }
-});
-
-// PUT update
-app.put('/api/weekly-advance/:id', async (req, res) => {
-  const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
-  try {
-    const { data, error } = await db
-      .from('weekly_advance')
-      .update({ receipt_date, team_leader, site_name, team_number, data: formData })
-      .eq('id', req.params.id)
-      .select()
-      .single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('Update weekly-advance error:', err);
-    res.status(500).json({ error: 'فشل التحديث.' });
-  }
-});
-
-// DELETE
-app.delete('/api/weekly-advance/:id', async (req, res) => {
-  try {
-    const { error } = await db
-      .from('weekly_advance')
-      .delete()
-      .eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Delete weekly-advance error:', err);
-    res.status(500).json({ error: 'فشل الحذف.' });
-  }
-});
-
-// Serve static assets in production
-
+// ── Static Asset & SPA Serving ──────────────────────────────────────────────
 const clientDistPath = path.join(__dirname, '../dist');
 app.use(express.static(clientDistPath));
 
-// Handle SPA routing: send index.html for any request that isn't API
 app.get('/*any', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
   }
-  res.sendFile(path.join(clientDistPath, 'index.html'));
+  const indexPath = path.join(clientDistPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send('Server is running. Run `npm run client` or `npm run build` for the frontend.');
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Engineering Management Server running at http://localhost:${PORT}`);
 });

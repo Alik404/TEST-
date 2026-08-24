@@ -7,8 +7,6 @@ import {
 } from 'lucide-react';
 import companyLogo from '../assets/company-logo.webp';
 
-const SPRING = { type: 'spring', stiffness: 300, damping: 30 };
-
 export default function Sidebar({
   activeTab, setActiveTab,
   collapsed, setCollapsed,
@@ -17,7 +15,7 @@ export default function Sidebar({
   mobileOpen, setMobileOpen,
 }) {
   const isAr = lang === 'ar';
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 768);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -26,7 +24,7 @@ export default function Sidebar({
   }, []);
 
   const menuItems = [
-    { id: 'executive-summary',    label: isAr ? '📊 التقرير التنفيذي الشامل' : 'Executive Summary', icon: BarChart3 },
+    { id: 'executive-summary',    label: isAr ? 'التقرير التنفيذي الشامل' : 'Executive Summary', icon: BarChart3 },
     { id: 'dashboard',             label: t('menuDashboard'),              icon: LayoutDashboard },
     { id: 'tracking',              label: t('menuTracking'),               icon: ClipboardList   },
     { id: 'marble',                label: t('menuMarble'),                 icon: Layers          },
@@ -48,13 +46,16 @@ export default function Sidebar({
     ? (collapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />)
     : (collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />);
 
+  // In RTL, the drawer enters from right (100% -> 0%), in LTR it enters from left (-100% -> 0%)
+  const mobileHiddenX = isAr ? '100%' : '-100%';
+
   return (
     <motion.aside
       layout
       className={`sidebar ${collapsed ? 'collapsed' : ''}`}
       animate={
         isMobile
-          ? { x: mobileOpen ? '0%' : '100%' }
+          ? { x: mobileOpen ? '0%' : mobileHiddenX }
           : { x: '0%' }
       }
       transition={{ type: 'spring', stiffness: 320, damping: 32 }}
@@ -99,7 +100,7 @@ export default function Sidebar({
               className={`nav-item ${isActive ? 'active' : ''}`}
               initial={{ opacity: 0, x: isAr ? 20 : -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: idx * 0.04, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ delay: idx * 0.03, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               whileHover={{ x: isAr ? -3 : 3 }}
               whileTap={{ scale: 0.97 }}
               aria-current={isActive ? 'page' : undefined}

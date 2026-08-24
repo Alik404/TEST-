@@ -17,6 +17,8 @@ export default function Header({
 }) {
   const getTitle = () => {
     switch (activeTab) {
+      case 'executive-summary':
+        return t('headerExecutiveTitle');
       case 'dashboard':
         return t('headerDashboardTitle');
       case 'tracking':
@@ -25,6 +27,14 @@ export default function Header({
         return t('headerMarbleTitle');
       case 'materials-consumption':
         return t('headerMaterialsConsumptionTitle');
+      case 'workers-wages':
+        return t('headerWorkersWagesTitle');
+      case 'weekly-advance':
+        return t('headerWeeklyAdvanceTitle');
+      case 'daily-updates':
+        return t('headerDailyUpdatesTitle');
+      case 'users-management':
+        return t('headerUsersTitle');
       default:
         return t('headerDefaultTitle');
     }
@@ -32,6 +42,8 @@ export default function Header({
 
   const getSubtitle = () => {
     switch (activeTab) {
+      case 'executive-summary':
+        return t('headerExecutiveSubtitle');
       case 'dashboard':
         return t('headerDashboardSubtitle');
       case 'tracking':
@@ -40,6 +52,14 @@ export default function Header({
         return t('headerMarbleSubtitle');
       case 'materials-consumption':
         return t('headerMaterialsConsumptionSubtitle');
+      case 'workers-wages':
+        return t('headerWorkersWagesSubtitle');
+      case 'weekly-advance':
+        return t('headerWeeklyAdvanceSubtitle');
+      case 'daily-updates':
+        return t('headerDailyUpdatesSubtitle');
+      case 'users-management':
+        return t('headerUsersSubtitle');
       default:
         return t('headerDefaultSubtitle');
     }
@@ -47,41 +67,45 @@ export default function Header({
 
   return (
     <header className="header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-      <div className="header-title-section" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <div className="header-title-section" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: '240px' }}>
         <button 
           className="mobile-menu-btn" 
           onClick={onMenuToggle}
+          aria-label={lang === 'ar' ? 'فتح القائمة الجانبية' : 'Open Sidebar'}
           style={{
-            background: 'none',
-            border: 'none',
+            background: 'var(--surface-warm)',
+            border: '1px solid var(--border)',
             color: 'var(--fg)',
             cursor: 'pointer',
-            padding: '0.25rem',
+            padding: '0.5rem',
             alignItems: 'center',
             justifyContent: 'center',
-            borderRadius: '50%'
+            borderRadius: 'var(--radius-md)',
+            minWidth: '40px',
+            minHeight: '40px'
           }}
         >
-          <Menu size={24} />
+          <Menu size={22} />
         </button>
         <div>
-          <h1 className="header-title" style={{ fontSize: '1.5rem' }}>{getTitle()}</h1>
-          <p className="header-subtitle">{getSubtitle()}</p>
+          <h1 className="header-title" style={{ fontSize: '1.35rem', fontWeight: '800', lineHeight: 1.3 }}>{getTitle()}</h1>
+          <p className="header-subtitle" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '2px' }}>{getSubtitle()}</p>
         </div>
       </div>
 
-      <div className="header-actions" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+      <div className="header-actions" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         {/* Theme Switcher */}
         <button 
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} 
           className="btn-pill"
           title={lang === 'ar' ? 'تغيير المظهر' : 'Toggle Theme'}
+          aria-label={lang === 'ar' ? 'تغيير المظهر' : 'Toggle Theme'}
         >
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          <span>
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+          <span className="btn-pill-label">
             {theme === 'dark' 
-              ? (lang === 'ar' ? 'مظهر فاتح' : 'Light Mode') 
-              : (lang === 'ar' ? 'مظهر داكن' : 'Dark Mode')}
+              ? (lang === 'ar' ? 'فاتح' : 'Light') 
+              : (lang === 'ar' ? 'داكن' : 'Dark')}
           </span>
         </button>
 
@@ -90,32 +114,35 @@ export default function Header({
           onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} 
           className="btn-pill"
           title={lang === 'ar' ? 'English' : 'العربية'}
+          aria-label={lang === 'ar' ? 'English' : 'العربية'}
         >
-          <Languages size={18} />
-          <span>{lang === 'ar' ? 'English' : 'العربية'}</span>
+          <Languages size={17} />
+          <span className="btn-pill-label">{lang === 'ar' ? 'English' : 'العربية'}</span>
         </button>
 
+        {/* Refresh button */}
         <button 
           onClick={onRefresh} 
           className="btn-pill"
           title={t('refresh')}
+          aria-label={t('refresh')}
           style={{ padding: '0.6rem' }}
         >
-          <RefreshCw size={18} />
+          <RefreshCw size={17} />
         </button>
 
         {/* Smart Export Actions */}
-        <button onClick={onExcelExport} className="btn-pill" title={t('exportExcel')}>
-          <FileSpreadsheet size={18} />
-          <span>{lang === 'ar' ? 'تصدير Excel' : 'Excel'}</span>
+        <button onClick={onExcelExport} className="btn-pill" title={t('exportExcel')} aria-label={t('exportExcel')}>
+          <FileSpreadsheet size={17} />
+          <span className="btn-pill-label">{lang === 'ar' ? 'Excel' : 'Excel'}</span>
         </button>
 
-        <button onClick={onPdfPrint} className="btn-pill" title={t('exportPdf')}>
-          <Printer size={18} />
-          <span>{lang === 'ar' ? 'تصدير PDF' : 'PDF'}</span>
+        <button onClick={onPdfPrint} className="btn-pill" title={t('exportPdf')} aria-label={t('exportPdf')}>
+          <Printer size={17} />
+          <span className="btn-pill-label">{lang === 'ar' ? 'PDF' : 'PDF'}</span>
         </button>
 
-        {/* User profile with dev role toggle helper */}
+        {/* User profile */}
         <div className="user-profile">
           <div className="avatar">
             <User size={16} />

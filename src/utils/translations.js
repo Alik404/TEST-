@@ -9,8 +9,11 @@ const dictionary = {
     save: "حفظ",
     cancel: "إلغاء",
     edit: "تعديل",
+    delete: "حذف",
+    search: "بحث...",
     admin: "مسؤول (كامل الصلاحيات)",
     viewer: "إدارة عليا (قراءة فقط)",
+    superAdmin: "المدير العام",
     toggle: "تبديل الصلاحية للمعاينة السريعة",
     roleToggle: "تبديل",
     refresh: "تحديث البيانات",
@@ -20,22 +23,42 @@ const dictionary = {
     seniorManagement: "الإدارة العليا / الجهة المستفيدة",
     issuedBy: "المهندس المقيم",
     reportDate: "تاريخ التقرير",
+    close: "إغلاق",
+    actions: "الإجراءات",
+    confirm: "تأكيد",
     
     // Sidebar
     sidebarTitle: "متابعة موقع الجندي المجهول",
+    menuExecutiveSummary: "التقرير التنفيذي الشامل",
     menuDashboard: "اللوحة الرئيسية",
     menuTracking: "سجل النزلات التفصيلي",
     menuMarble: "توزيع المرمر والزونات",
     menuMaterialsConsumption: "استهلاك المواد اليومي",
+    menuWorkersWages: "أجور العمال",
+    menuWeeklyAdvance: "سلفة مقدمة",
+    menuDailyUpdates: "التحديث اليومي",
+    menuUsers: "إدارة الحسابات",
     logout: "تسجيل الخروج",
     
     // Header
+    headerExecutiveTitle: "التقرير التنفيذي الشامل للمشروع",
+    headerExecutiveSubtitle: "ملخص تحليلي متقدم لموقف التنفيذ، تكاليف العمالة، واستهلاك المواد",
     headerDashboardTitle: "لوحة التحكم الرئيسية للمشروع",
     headerDashboardSubtitle: "موقع النصب التذكاري للجندي المجهول - الموقف الكلي والنسب التراكمية",
     headerTrackingTitle: "سجل المتابعة التفصيلي للنزلات",
     headerTrackingSubtitle: "سجل متابعة وتغيير حالة النزلات الـ 113 الموزعة على الزونات A, B, C",
     headerMarbleTitle: "تقرير توزيع قطع المرمر والزونات",
     headerMarbleSubtitle: "موقف التوزيع الميداني لقطع المرمر بالألوان الأبيض والجوزي حسب الزون",
+    headerMaterialsConsumptionTitle: "متابعة استهلاك المواد اليومي",
+    headerMaterialsConsumptionSubtitle: "نموذج إدخال وجرد استهلاك المواد الأساسية والمرمر والمواد العازلة والسائبة يومياً",
+    headerWorkersWagesTitle: "سجل أجور واستحقاقات العمال",
+    headerWorkersWagesSubtitle: "أرشفة يوميات الكوادر المنفذة وأجور الشفتات وحساب الإجماليات بدقة",
+    headerWeeklyAdvanceTitle: "تسمية السلفة الأسبوعية الموقعية",
+    headerWeeklyAdvanceSubtitle: "سجل السلف التراكمية، بنود التقييم الميداني، وجداول الكميات المنجزة",
+    headerDailyUpdatesTitle: "سجل التحديثات الميدانية والمحادثة",
+    headerDailyUpdatesSubtitle: "توثيق بالصور والصوت والتفاعل الفوري مع مهندسي الموقع والإدارة",
+    headerUsersTitle: "إدارة صلاحيات المستخدمين",
+    headerUsersSubtitle: "التحكم بالحسابات، كلمات المرور، ومستويات الوصول للنظام",
     headerDefaultTitle: "متابعة موقع الجندي المجهول",
     headerDefaultSubtitle: "نظام حساب وأرشفة نسب الإنجاز التلقائية",
     
@@ -87,6 +110,16 @@ const dictionary = {
     btnMarkAsDone: "تحديد كمنجز",
     btnReadOnly: "للقراءة فقط",
     updating: "تحديث...",
+    quickEditNazala: "تعديل تفاصيل النزلة",
+    whiteMarked: "الأبيض المؤشر",
+    whiteExtra: "إضافي أخضر (أبيض)",
+    whiteApplied: "الأبيض المطبق",
+    whiteDate: "تاريخ تطبيق الأبيض",
+    brownMarked: "الجوزي المؤشر",
+    brownExtra: "إضافي أخضر (جوزي)",
+    brownApplied: "الجوزي المطبق",
+    brownDate: "تاريخ تطبيق الجوزي",
+    entitlement: "استحقاق الخلفة",
     
     // Materials Report
     marbleWhiteTitle: "المرمر الأبيض",
@@ -123,8 +156,6 @@ const dictionary = {
     connError: "تعذر الاتصال بالخادم. يرجى المحاولة مرة أخرى.",
     
     // Materials Consumption
-    headerMaterialsConsumptionTitle: "متابعة استهلاك المواد اليومي",
-    headerMaterialsConsumptionSubtitle: "نموذج إدخال وجرد استهلاك المواد الأساسية والمرمر والمواد العازلة والسائبة يومياً",
     materialsReportDate: "التاريخ",
     materialsReportDay: "اليوم",
     materialsReportStartTime: "وقت المباشرة",
@@ -196,8 +227,11 @@ const dictionary = {
     save: "Save",
     cancel: "Cancel",
     edit: "Edit",
+    delete: "Delete",
+    search: "Search...",
     admin: "Admin (Full Permissions)",
     viewer: "Senior Management (Read Only)",
+    superAdmin: "General Director",
     toggle: "Toggle permissions for quick preview",
     roleToggle: "Toggle",
     refresh: "Refresh Data",
@@ -207,22 +241,42 @@ const dictionary = {
     seniorManagement: "Senior Management / Beneficiary",
     issuedBy: "Resident Engineer",
     reportDate: "Report Date",
+    close: "Close",
+    actions: "Actions",
+    confirm: "Confirm",
     
     // Sidebar
     sidebarTitle: "Unknown Soldier Site Monitoring",
+    menuExecutiveSummary: "Executive Summary",
     menuDashboard: "Dashboard",
     menuTracking: "Detailed Nazalat",
     menuMarble: "Marble & Zones",
     menuMaterialsConsumption: "Daily Materials",
+    menuWorkersWages: "Workers Wages",
+    menuWeeklyAdvance: "Advance Payment",
+    menuDailyUpdates: "Daily Log",
+    menuUsers: "User Accounts",
     logout: "Logout",
     
     // Header
+    headerExecutiveTitle: "Comprehensive Executive Summary",
+    headerExecutiveSubtitle: "Advanced analytical summary of execution progress, labor wages, and material consumption",
     headerDashboardTitle: "Project Main Dashboard",
     headerDashboardSubtitle: "Unknown Soldier Memorial Site - General Status & Cumulative Ratios",
     headerTrackingTitle: "Detailed Downspouts (Nazalat) Log",
     headerTrackingSubtitle: "Monitoring & status configuration of the 113 Downspouts across Zones A, B, C",
     headerMarbleTitle: "Marble & Zones Distribution Report",
     headerMarbleSubtitle: "Field status of White and Brown Alabaster pieces distributed by Zone",
+    headerMaterialsConsumptionTitle: "Daily Materials Consumption Tracking",
+    headerMaterialsConsumptionSubtitle: "Entry form and inventory log for daily consumption of basic materials, marble, sealants, and bulk materials",
+    headerWorkersWagesTitle: "Workers Wages & Entitlements Log",
+    headerWorkersWagesSubtitle: "Archiving crew daily shifts, wage rates, and precise total cost calculations",
+    headerWeeklyAdvanceTitle: "Site Weekly Advance Payment",
+    headerWeeklyAdvanceSubtitle: "Log of cumulative advances, field performance criteria, and completed bills of quantities",
+    headerDailyUpdatesTitle: "Field Updates & Chat Log",
+    headerDailyUpdatesSubtitle: "Documenting with photos, voice notes, and real-time interaction between site and management",
+    headerUsersTitle: "User Account & Role Management",
+    headerUsersSubtitle: "Control accounts, passwords, and permission levels for the system",
     headerDefaultTitle: "Unknown Soldier Site Monitoring",
     headerDefaultSubtitle: "Automated progress tracking and calculation system",
     
@@ -274,6 +328,16 @@ const dictionary = {
     btnMarkAsDone: "Mark Completed",
     btnReadOnly: "Read Only",
     updating: "Updating...",
+    quickEditNazala: "Edit Downspout Details",
+    whiteMarked: "White Marked",
+    whiteExtra: "White Extra (Green)",
+    whiteApplied: "White Applied",
+    whiteDate: "White Applied Date",
+    brownMarked: "Brown Marked",
+    brownExtra: "Brown Extra (Green)",
+    brownApplied: "Brown Applied",
+    brownDate: "Brown Applied Date",
+    entitlement: "Crew Entitlement",
     
     // Materials Report
     marbleWhiteTitle: "White Marble",
@@ -310,8 +374,6 @@ const dictionary = {
     connError: "Server connection failed. Please try again.",
     
     // Materials Consumption
-    headerMaterialsConsumptionTitle: "Daily Materials Consumption Tracking",
-    headerMaterialsConsumptionSubtitle: "Entry form and inventory log for daily consumption of basic materials, marble, sealants, and bulk materials",
     materialsReportDate: "Date",
     materialsReportDay: "Day",
     materialsReportStartTime: "Start Time",
@@ -378,13 +440,10 @@ const dictionary = {
 // Mappings for DB values
 const dataTranslations = {
   ar: {
-    // Categories
     "أعمال المرمر": "أعمال المرمر",
     "أعمال الجوينات": "أعمال الجوينات",
     "سقف المتحف": "سقف المتحف",
     "السمكرة والستيل": "السمكرة والستيل",
-    
-    // Task Names
     "تطبيك النزلات (محدث تلقائياً)": "تطبيك النزلات (محدث تلقائياً)",
     "استبدال رؤوس المثلثات": "استبدال رؤوس المثلثات",
     "شربت رؤوس المثلثات": "شربت رؤوس المثلثات",
@@ -400,26 +459,19 @@ const dataTranslations = {
     "اعمال السكاي لايت": "اعمال السكاي لايت",
     "أعمال السكاي لايت": "أعمال السكاي لايت",
     "شريتة النزلات": "شريتة النزلات",
-    
-    // Statuses
     "منجز": "منجز",
     "متبقي": "متبقي",
-
-    // Units
     "نزلة": "نزلة",
     "قطعة": "قطعة",
     "متر": "متر",
     "م2": "م2",
     "-": "-",
-    
-    // Notes & Field Status
     "مطابق لجرودات الموقع": "مطابق لجرودات الموقع",
     "مطابق لملف الجرد الكلي الأخير": "مطابق لملف الجرد الكلي الأخير",
     "قيد التجهيز والعمل": "قيد التجهيز والعمل",
     "مكتمل بالكامل مع استبدال كافة القطع": "مكتمل بالكامل مع استبدال كافة القطع",
     "مكتمل بالكامل": "مكتمل بالكامل",
     "منجزة ومكتملة بالكامل لكافة الزونات": "منجزة ومكتملة بالكامل لكافة الزونات",
-    "زون A واصل 96% (باقي مثلثات الجوينات الطولية فقط)، زون C إلى نهاية عمل ديار نزلة رقم 19": "زون A واصل 96% (باقي مثلثات الجوينات الطولية فقط)، زون C إلى نهاية عمل ديار نزلة رقم 19",
     "الطول المنجز 2204 م": "الطول المنجز 2204 م",
     "الطول المنجز 536 م": "الطول المنجز 536 م",
     "مكتملة بطول م3,435.30": "مكتملة بطول م3,435.30",
@@ -442,13 +494,10 @@ const dataTranslations = {
     "لم يحدد بعد": "لم يحدد بعد"
   },
   en: {
-    // Categories
     "أعمال المرمر": "Marble Works",
     "أعمال الجوينات": "Joint Works",
     "سقف المتحف": "Museum Roof",
     "السمكرة والستيل": "Metalwork & Steel",
-    
-    // Task Names
     "تطبيك النزلات (محدث تلقائياً)": "Downspouts Cladding (Auto-updated)",
     "استبدال رؤوس المثلثات": "Triangle Heads Replacement",
     "شربت رؤوس المثلثات": "Triangle Heads Grouting",
@@ -464,30 +513,23 @@ const dataTranslations = {
     "اعمال السكاي لايت": "Skylight Works",
     "أعمال السكاي لايت": "Skylight Works",
     "شريتة النزلات": "Downspouts Grouting",
-    
-    // Statuses
     "منجز": "Completed",
     "متبقي": "Remaining",
-
-    // Units
     "نزلة": "downspout",
     "قطعة": "piece",
     "متر": "meter",
     "م2": "m²",
     "-": "-",
-    
-    // Notes & Field Status
     "مطابق لجرودات الموقع": "Matching site inventory",
-    "مطابق لملف الجرد الكلي الأخير": "Matching the final total inventory file",
+    "مطابق لملف الجرد الكلي الأخير": "Matching final total inventory file",
     "قيد التجهيز والعمل": "Under preparation and work",
     "مكتمل بالكامل مع استبدال كافة القطع": "Fully completed with all pieces replaced",
     "مكتمل بالكامل": "Fully completed",
     "منجزة ومكتملة بالكامل لكافة الزونات": "Fully done and completed for all zones",
-    "زون A واصل 96% (باقي مثلثات الجوينات الطولية فقط)، زون C إلى نهاية عمل ديار نزلة رقم 19": "Zone A at 96% (only vertical joint triangles left), Zone C to end of downspout #19",
     "الطول المنجز 2204 م": "Completed length 2204 m",
     "الطول المنجز 536 م": "Completed length 536 m",
     "مكتملة بطول م3,435.30": "Completed with length 3,435.30 m",
-    "الأعمال مستمرة بنسق جيد (م² )": "Work is progressing at a good pace (m²)",
+    "الأعمال مستمرة بنسق جيد (م² )": "Work progressing well (m²)",
     "مرحلة قيد العمل المكثف (م² )": "Stage under intensive work (m²)",
     "مرحلة العزل متقدمة (م² )": "Insulation stage is advanced (m²)",
     "المتبقي يمثل نسبة التالف": "Remaining represents waste percentage",
@@ -509,13 +551,12 @@ const dataTranslations = {
 
 export const translateText = (text, lang) => {
   if (!text) return "";
-  const cleaned = text.trim();
+  const cleaned = String(text).trim();
   const langMap = dataTranslations[lang];
   if (langMap && langMap[cleaned] !== undefined) {
     return langMap[cleaned];
   }
   
-  // Dynamic translations for note/field values if they have common substrings
   let translatedStr = cleaned;
   if (lang === 'en') {
     if (cleaned.startsWith('مشربت لغاية النزلة رقم')) {
