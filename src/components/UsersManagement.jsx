@@ -20,6 +20,8 @@ export default function UsersManagement({ currentUser, t, lang }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
 
   // Fetch all users
   const fetchUsers = async () => {
@@ -118,19 +120,10 @@ export default function UsersManagement({ currentUser, t, lang }) {
     }
   };
 
-  const handleDelete = async (id, userEmail) => {
-    if (id === currentUser.id) {
-      alert(lang === 'ar' ? 'لا يمكنك حذف حسابك الحالي الذي تستخدمه لتسجيل الدخول!' : 'You cannot delete your own logged-in account!');
-      return;
-    }
-
-    const confirmMsg = lang === 'ar' 
-      ? `هل أنت متأكد من حذف الحساب "${userEmail}"؟ لا يمكن التراجع عن هذا الإجراء.`
-      : `Are you sure you want to delete the account "${userEmail}"? This action cannot be undone.`;
-
-    if (!window.confirm(confirmMsg)) return;
-
-    setLoading(true);
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    const { id } = userToDelete;
+    setDeletingUserId(id);
     try {
       const res = await fetch(`/api/users/${id}`, {
         method: 'DELETE'
@@ -138,6 +131,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
       if (res.ok) {
         setSuccess(lang === 'ar' ? 'تم حذف الحساب بنجاح.' : 'Account deleted successfully.');
         setTimeout(() => setSuccess(''), 3000);
+        setUserToDelete(null);
         fetchUsers();
       } else {
         const data = await res.json();
@@ -147,7 +141,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
       console.error(err);
       setError(lang === 'ar' ? 'خطأ في الاتصال بالخادم.' : 'Server connection error.');
     } finally {
-      setLoading(false);
+      setDeletingUserId(null);
     }
   };
 
@@ -372,7 +366,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
                             </button>
                             <button 
                               className="btn btn-secondary" 
-                              onClick={() => handleDelete(u.id, u.email)}
+                              onClick={() => setUserToDelete(u)}
                               disabled={u.id === currentUser.id}
                               style={{ 
                                 padding: '6px 10px', 
@@ -542,6 +536,80 @@ export default function UsersManagement({ currentUser, t, lang }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Custom In-App Delete Confirmation Modal ──────────────── */}
+      <AnimatePresence>
+        {userToDelete && (
+          <div
+            className="modal-overlay"
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 10001,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem'
+            }}
+            onClick={() => !deletingUserId && setUserToDelete(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              style={{
+                background: 'var(--surface-solid, #1e293b)',
+                borderRadius: 'var(--radius-xl, 16px)',
+                width: '100%',
+                maxWidth: '440px',
+                padding: '2rem 1.75rem',
+                border: '1px solid var(--border)',
+                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+                textAlign: 'center'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
+                <Trash2 size={28} />
+              </div>
+
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--fg)', marginBottom: '0.5rem' }}>
+                {lang === 'ar' ? 'تأكيد حذف الحساب' : 'Confirm Account Deletion'}
+              </h3>
+              
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                {lang === 'ar' 
+                  ? `هل أنت متأكد من رغبتك في حذف الحساب "${userToDelete.email}" (${userToDelete.name})؟ لا يمكن التراجع عن هذا الإجراء.`
+                  : `Are you sure you want to delete the account "${userToDelete.email}" (${userToDelete.name})? This action cannot be undone.`}
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setUserToDelete(null)}
+                  disabled={Boolean(deletingUserId)}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, padding: '0.65rem', fontWeight: '600' }}
+                >
+                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteUser}
+                  disabled={Boolean(deletingUserId)}
+                  className="btn btn-danger"
+                  style={{ flex: 1, padding: '0.65rem', fontWeight: '700', background: 'var(--danger, #ef4444)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                >
+                  {deletingUserId ? (lang === 'ar' ? 'جاري الحذف...' : 'Deleting...') : (lang === 'ar' ? 'نعم، احذف' : 'Yes, Delete')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

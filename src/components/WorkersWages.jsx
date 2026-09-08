@@ -31,6 +31,9 @@ export default function WorkersWages({ user, t, lang }) {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   
   const [formData, setFormData] = useState({
     work_date: new Date().toISOString().split('T')[0],
@@ -40,8 +43,6 @@ export default function WorkersWages({ user, t, lang }) {
     shift_price: 30000,
     notes: ''
   });
-
-  const [submitting, setSubmitting] = useState(false);
 
   // Fetch all wages
   const fetchWages = async () => {
@@ -143,15 +144,20 @@ export default function WorkersWages({ user, t, lang }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm(isAr ? 'هل أنت تأكد من رغبتك في حذف هذا السجل؟' : 'Are you sure you want to delete this record?')) return;
+  const confirmDelete = async () => {
+    if (!itemToDelete) return;
+    const { id } = itemToDelete;
+    setDeletingId(id);
     try {
       const res = await fetch(`/api/workers-wages/${id}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchWages();
+        setItemToDelete(null);
       }
     } catch (err) {
       console.error('Error deleting record:', err);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -766,7 +772,7 @@ export default function WorkersWages({ user, t, lang }) {
                           <Edit2 size={15} />
                         </button>
                         <button
-                          onClick={() => handleDelete(item.id)}
+                          onClick={() => setItemToDelete(item)}
                           title="حذف"
                           style={{
                             padding: '0.4rem',
@@ -1080,6 +1086,95 @@ export default function WorkersWages({ user, t, lang }) {
                 </div>
 
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Custom In-App Delete Confirmation Modal ──────────────── */}
+      <AnimatePresence>
+        {itemToDelete && (
+          <div
+            className="modal-overlay"
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 10001,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem'
+            }}
+            onClick={() => !deletingId && setItemToDelete(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              style={{
+                background: 'var(--surface-solid, #1e293b)',
+                borderRadius: 'var(--radius-xl, 16px)',
+                width: '100%',
+                maxWidth: '440px',
+                padding: '2rem 1.75rem',
+                border: '1px solid var(--border)',
+                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+                textAlign: 'center'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
+                <Trash2 size={28} />
+              </div>
+
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--fg)', marginBottom: '0.5rem' }}>
+                {isAr ? 'تأكيد حذف سجل الأجور' : 'Confirm Wage Record Deletion'}
+              </h3>
+              
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                {isAr 
+                  ? `هل أنت متأكد من رغبتك في حذف سجل فقرة "${itemToDelete.work_item || 'العمل'}" الخاصة بـ (${itemToDelete.worker_name || 'العمال'})؟ سيتم حذفه نهائياً من النظام.`
+                  : `Are you sure you want to delete the wage record for "${itemToDelete.work_item}" (${itemToDelete.worker_name})? This action cannot be undone.`}
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  disabled={Boolean(deletingId)}
+                  style={{
+                    flex: 1,
+                    padding: '0.65rem',
+                    fontWeight: '600',
+                    borderRadius: '8px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: 'var(--fg)',
+                    border: '1px solid var(--border)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={Boolean(deletingId)}
+                  style={{
+                    flex: 1,
+                    padding: '0.65rem',
+                    fontWeight: '700',
+                    background: 'var(--danger, #ef4444)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {deletingId ? (isAr ? 'جاري الحذف...' : 'Deleting...') : (isAr ? 'نعم، احذف' : 'Yes, Delete')}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
