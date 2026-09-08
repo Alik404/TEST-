@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Layers, Plus, Printer, Search, Edit3, Trash2, CheckCircle2, 
-  Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy
+  Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy,
+  Award, TrendingUp
 } from 'lucide-react';
 
 export default function MarblexProgress({ user, lang, t }) {
@@ -100,7 +101,15 @@ export default function MarblexProgress({ user, lang, t }) {
 
     const piecesProg = totPieces > 0 ? parseFloat(((appPieces / totPieces) * 100).toFixed(2)) : 0;
     const steelProg = totSteel > 0 ? parseFloat(((appSteel / totSteel) * 100).toFixed(2)) : 0;
-    const overallProg = parseFloat(((piecesProg + steelProg) / 2).toFixed(2));
+    
+    let overallProg = 0;
+    if (totPieces > 0 && totSteel > 0) {
+      overallProg = parseFloat(((piecesProg + steelProg) / 2).toFixed(2));
+    } else if (totPieces > 0) {
+      overallProg = piecesProg;
+    } else if (totSteel > 0) {
+      overallProg = steelProg;
+    }
 
     const completedCount = list.filter(i => i.status === 'منجز').length;
     const inProgressCount = list.filter(i => i.status === 'قيد التنفيذ').length;
@@ -377,6 +386,20 @@ export default function MarblexProgress({ user, lang, t }) {
     <tbody>
       ${rowsHTML || '<tr><td colspan="12" style="text-align:center;padding:20px;color:#94a3b8;">لا توجد سجلات تطابق الفلتر المختار</td></tr>'}
     </tbody>
+    <tfoot>
+      <tr style="background:#0f172a;color:#ffffff;font-weight:bold;">
+        <td colspan="3" style="text-align:center;padding:9px;font-weight:800;font-size:13px;">المجموع الإجمالي / نسبة الإنجاز الكلية:</td>
+        <td style="text-align:center;padding:9px;">${stats.totPieces}</td>
+        <td style="text-align:center;padding:9px;color:#34d399;">${stats.appPieces}</td>
+        <td style="text-align:center;padding:9px;color:#34d399;direction:ltr;">${stats.piecesProg}%</td>
+        <td style="text-align:center;padding:9px;">${stats.totSteel}</td>
+        <td style="text-align:center;padding:9px;color:#fbbf24;">${stats.appSteel}</td>
+        <td style="text-align:center;padding:9px;color:#fbbf24;direction:ltr;">${stats.steelProg}%</td>
+        <td style="text-align:center;padding:9px;background:#1e293b;color:#38bdf8;font-size:14px;font-weight:900;direction:ltr;">${stats.overallProg}%</td>
+        <td style="text-align:center;padding:9px;font-size:11px;">منجز: ${stats.completedCount} | قيد العمل: ${stats.inProgressCount}</td>
+        <td style="font-size:11px;color:#cbd5e1;">المحصلة الكلية المعتمدة</td>
+      </tr>
+    </tfoot>
   </table>
 
   <div class="signatures">
@@ -763,8 +786,190 @@ export default function MarblexProgress({ user, lang, t }) {
               })
             )}
           </tbody>
+          {!loading && filteredItems.length > 0 && (
+            <tfoot style={{
+              background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.95) 100%)',
+              borderTop: '2px solid var(--accent)',
+              boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.15)'
+            }}>
+              <tr style={{ fontWeight: '700' }}>
+                <td style={{ padding: '1rem 0.75rem', textAlign: 'center', color: 'var(--accent)' }}>
+                  <Award size={18} />
+                </td>
+                <td style={{ padding: '1rem', fontSize: '0.95rem', fontWeight: '800', color: 'var(--fg)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>{isAr ? 'الإجمالي العام للماربلكس:' : 'Overall Total Progress:'}</span>
+                    <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.18)', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: '800' }}>
+                      {filteredItems.length} {isAr ? 'مقاطع' : 'Sections'}
+                    </span>
+                  </div>
+                </td>
+                <td style={{ padding: '1rem' }}>
+                  <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--fg)', fontSize: '0.78rem' }}>
+                    {selectedZone === 'ALL' ? (isAr ? 'جميع الزونات' : 'All Zones') : selectedZone}
+                  </span>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.92rem' }}>
+                  <span style={{ fontWeight: '900', color: 'var(--accent)' }}>{stats.appPieces}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}> / {stats.totPieces}</span>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center', width: '110px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>
+                      {stats.piecesProg}%
+                    </span>
+                    <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, stats.piecesProg)}%`, height: '100%', background: 'var(--accent)' }} />
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.92rem' }}>
+                  <span style={{ fontWeight: '900', color: 'var(--warning)' }}>{stats.appSteel}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}> / {stats.totSteel}</span>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center', width: '110px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>
+                      {stats.steelProg}%
+                    </span>
+                    <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, stats.steelProg)}%`, height: '100%', background: 'var(--warning)' }} />
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0.45rem 0.85rem',
+                    borderRadius: 'var(--radius-md)',
+                    background: stats.overallProg >= 100 
+                      ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.35))'
+                      : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.35))',
+                    border: `1.5px solid ${stats.overallProg >= 100 ? '#10b981' : 'var(--accent)'}`,
+                    boxShadow: '0 2px 10px rgba(99, 102, 241, 0.25)'
+                  }}>
+                    <span style={{
+                      fontWeight: '900',
+                      fontSize: '1.1rem',
+                      color: stats.overallProg >= 100 ? '#10b981' : 'var(--accent)',
+                      direction: 'ltr'
+                    }}>
+                      {stats.overallProg}%
+                    </span>
+                  </div>
+                </td>
+                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', alignItems: 'center' }}>
+                    <span className="badge badge-success" style={{ fontSize: '0.72rem', padding: '0.15rem 0.4rem' }}>
+                      {isAr ? `منجز: ${stats.completedCount}` : `Done: ${stats.completedCount}`}
+                    </span>
+                    <span className="badge badge-warning" style={{ fontSize: '0.72rem', padding: '0.15rem 0.4rem' }}>
+                      {isAr ? `قيد العمل: ${stats.inProgressCount}` : `Active: ${stats.inProgressCount}`}
+                    </span>
+                  </div>
+                </td>
+                <td style={{ padding: '1rem', fontSize: '0.82rem', color: 'var(--muted)' }}>
+                  {isAr ? 'المحصلة الإجمالية المعتمدة لجميع المقاطع' : 'Certified grand total for all sections'}
+                </td>
+                {isAdmin && (
+                  <td style={{ padding: '1rem', textAlign: 'center', color: 'var(--muted)' }}>
+                    -
+                  </td>
+                )}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
+
+      {/* ── Bottom Executive Summary Ribbon ───────────────────────── */}
+      {!loading && filteredItems.length > 0 && (
+        <div style={{
+          marginTop: '1.25rem',
+          padding: '1.15rem 1.5rem',
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
+          borderRadius: 'var(--radius-xl)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '1.25rem',
+          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.25)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: 'var(--radius-lg)',
+              background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.4)'
+            }}>
+              <TrendingUp size={24} />
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: 'var(--fg)' }}>
+                {isAr ? 'نسبة الإنجاز الكلية للماربلكس' : 'Overall Marblex Completion'}
+              </h4>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted)' }}>
+                {isAr 
+                  ? `محسوبة تراكمياً من مجموع ${filteredItems.length} مقطع (${stats.appPieces}/${stats.totPieces} قطعة | ${stats.appSteel}/${stats.totSteel} ستيل)`
+                  : `Calculated cumulatively across ${filteredItems.length} sections`}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' }}>
+            {/* Pieces Summary */}
+            <div style={{ textAlign: isAr ? 'right' : 'left' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: '600' }}>
+                {isAr ? 'إنجاز القطع' : 'Pieces Progress'}
+              </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>
+                {stats.piecesProg}%
+              </div>
+            </div>
+
+            {/* Steel Summary */}
+            <div style={{ textAlign: isAr ? 'right' : 'left' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: '600' }}>
+                {isAr ? 'إنجاز الستيل' : 'Steel Progress'}
+              </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>
+                {stats.steelProg}%
+              </div>
+            </div>
+
+            {/* Overall Percentage Badge */}
+            <div style={{
+              padding: '0.65rem 1.4rem',
+              borderRadius: 'var(--radius-lg)',
+              background: stats.overallProg >= 100 
+                ? 'linear-gradient(135deg, #10b981, #059669)'
+                : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              color: '#ffffff',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(99, 102, 241, 0.4)'
+            }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {isAr ? 'المحصلة النهائية' : 'Grand Total'}
+              </span>
+              <span style={{ fontSize: '1.5rem', fontWeight: '900', direction: 'ltr', lineHeight: 1.1 }}>
+                {stats.overallProg}%
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Add / Edit Modal ─────────────────────────────────────── */}
       <AnimatePresence>
