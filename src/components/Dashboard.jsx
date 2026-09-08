@@ -48,6 +48,8 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
     nazalat_progress_percent: 0
   };
 
+  const isAr = lang === 'ar';
+
   // Group tasks by category
   const groupedTasks = safeCategories.reduce((acc, cat) => {
     acc[cat.name] = safeTasks.filter(t => t.category_name === cat.name);
@@ -148,65 +150,493 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
   };
 
   const handlePrintProgressReport = () => {
-    let rows = '';
-    categories.forEach(cat => {
-      const catTasks = tasks.filter(t => t.category_name === cat.name);
+    const totalTasks = safeTasks.length;
+    const completedTasks = safeTasks.filter(t => (Number(t.progress_percent) || 0) >= 100).length;
+    const inProgressTasks = safeTasks.filter(t => (Number(t.progress_percent) || 0) > 0 && (Number(t.progress_percent) || 0) < 100).length;
+    const notStartedTasks = safeTasks.filter(t => (Number(t.progress_percent) || 0) === 0).length;
+    
+    const overallProgNum = safeKpis.overall_progress_percent !== undefined 
+      ? Number(safeKpis.overall_progress_percent) 
+      : (safeTasks.length > 0 ? (safeTasks.reduce((s, t) => s + (Number(t.progress_percent) || 0), 0) / safeTasks.length) : 0);
+    const overallProg = overallProgNum.toFixed(2);
+
+    // Marble & Nazalat
+    const nazalatDone = safeKpis.nazalat_completed || 0;
+    const nazalatTot = safeKpis.nazalat_total || 113;
+    const appliedMarble = safeKpis.applied_marble_pieces || 0;
+
+    // Marblex Tasks
+    const mbxPieceTask = safeTasks.find(t => t.name && t.name.includes('الماربلكس (القطع)'));
+    const mbxSteelTask = safeTasks.find(t => t.name && t.name.includes('ستيلات التثبيت للماربلكس'));
+    const mbxPiecesDone = mbxPieceTask ? (mbxPieceTask.completed_quantity || 0) : (safeKpis.applied_marblex_pieces || 0);
+    const mbxPiecesTot = mbxPieceTask ? (mbxPieceTask.total_quantity || 0) : (safeKpis.total_marblex_pieces || 0);
+    const mbxPiecesProg = mbxPieceTask ? Number(mbxPieceTask.progress_percent).toFixed(1) : (Number(safeKpis.marblex_pieces_progress || 0).toFixed(1));
+    const mbxSteelDone = mbxSteelTask ? (mbxSteelTask.completed_quantity || 0) : (safeKpis.applied_marblex_steel || 0);
+    const mbxSteelTot = mbxSteelTask ? (mbxSteelTask.total_quantity || 0) : (safeKpis.total_marblex_steel || 0);
+    const mbxSteelProg = mbxSteelTask ? Number(mbxSteelTask.progress_percent).toFixed(1) : (Number(safeKpis.marblex_steel_progress || 0).toFixed(1));
+
+    let rowsHTML = '';
+    let globalIndex = 0;
+
+    safeCategories.forEach((cat) => {
+      const catTasks = safeTasks.filter(t => t.category_name === cat.name);
       if (catTasks.length === 0) return;
-      rows += `<tr style="background:#f1f5f9;font-weight:bold"><td colspan="6">${cat.name}</td></tr>`;
-      catTasks.forEach(task => {
-        rows += `<tr>
-          <td>${task.name}</td>
-          <td style="text-align:center">${task.total_quantity || '-'}</td>
-          <td style="text-align:center">${task.completed_quantity || '-'}</td>
-          <td style="text-align:center">${task.total_quantity ? (task.total_quantity - task.completed_quantity).toFixed(2) : '-'}</td>
-          <td style="text-align:center;font-weight:bold;direction:ltr">${task.progress_percent.toFixed(2)}%</td>
-          <td>${task.notes || ''}</td>
-        </tr>`;
+
+      const catAvgProg = (catTasks.reduce((acc, t) => acc + (Number(t.progress_percent) || 0), 0) / catTasks.length).toFixed(1);
+
+      rowsHTML += `
+        <tr class="category-banner-row">
+          <td colspan="8">
+            <div class="category-banner">
+              <span class="cat-name">📁 ${translateText(cat.name, lang)}</span>
+              <span class="cat-pill">${catTasks.length} ${isAr ? 'فقرات' : 'tasks'} | ${isAr ? 'متوسط الإنجاز' : 'Avg'}: ${catAvgProg}%</span>
+            </div>
+          </td>
+        </tr>
+      `;
+
+      catTasks.forEach((task) => {
+        globalIndex++;
+        const isAuto = !task.is_manual;
+        const unitTrans = translateText(task.unit, lang);
+        const hasQty = task.total_quantity !== null && task.total_quantity > 0;
+        
+        let totDisplay = hasQty ? `${Number(task.total_quantity).toLocaleString()} ${unitTrans}` : '-';
+        let compDisplay = hasQty ? `${Number(task.completed_quantity || 0).toLocaleString()} ${unitTrans}` : '-';
+        let remVal = hasQty ? Math.max(0, task.total_quantity - (task.completed_quantity || 0)) : null;
+        let remDisplay = remVal !== null ? `${Number(remVal).toLocaleString()} ${unitTrans}` : '-';
+
+        const progVal = Number(task.progress_percent) || 0;
+        const progDisplay = progVal.toFixed(1);
+        const isDone = progVal >= 100;
+        const barColor = isDone ? '#10b981' : (progVal >= 50 ? '#2563eb' : (progVal > 0 ? '#f59e0b' : '#cbd5e1'));
+
+        rowsHTML += `
+          <tr class="task-row ${isDone ? 'task-done' : ''}">
+            <td style="text-align:center;font-weight:bold;color:#64748b;width:38px;">${globalIndex}</td>
+            <td style="font-weight:700;color:#0f172a;">
+              ${translateText(task.name, lang)}
+              ${isAuto ? `<span class="badge-auto">${isAr ? 'محدث تلقائياً' : 'Auto'}</span>` : ''}
+            </td>
+            <td style="text-align:center;color:#475569;font-size:12px;width:65px;">${unitTrans || '-'}</td>
+            <td style="text-align:center;font-weight:600;width:95px;">${totDisplay}</td>
+            <td style="text-align:center;font-weight:bold;color:#047857;width:95px;">${compDisplay}</td>
+            <td style="text-align:center;font-weight:bold;color:#b45309;width:95px;">${remDisplay}</td>
+            <td style="text-align:center;width:120px;">
+              <div class="prog-wrapper">
+                <span class="prog-val" style="color: ${isDone ? '#047857' : '#0f172a'}">${progDisplay}%</span>
+                <div class="prog-track">
+                  <div class="prog-fill" style="width: ${Math.min(100, progVal)}%; background-color: ${barColor};"></div>
+                </div>
+              </div>
+            </td>
+            <td style="font-size:12px;color:#64748b;">${translateText(task.notes, lang) || '-'}</td>
+          </tr>
+        `;
       });
     });
 
+    const currentDate = new Date().toLocaleDateString(isAr ? 'ar-IQ' : 'en-GB', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    const currentTime = new Date().toLocaleTimeString(isAr ? 'ar-IQ' : 'en-GB', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
     const html = `<!DOCTYPE html>
-<html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}">
+<html lang="${lang}" dir="${isAr ? 'rtl' : 'ltr'}">
 <head>
   <meta charset="UTF-8"/>
-  <title>الجدول العام لتقدم العمل</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>${isAr ? 'الجدول العام لتقدم العمل بالمشروع' : 'General Project Work Progress Schedule'}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Cairo', sans-serif; padding: 20px; color: #1e293b; }
-    h1 { text-align: center; color: #0f172a; margin-bottom: 5px; }
-    h3 { text-align: center; color: #475569; margin-top: 0; margin-bottom: 20px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-    th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
-    th { background-color: #0f172a; color: white; font-weight: bold; text-align: center; }
-    .print-footer { display: flex; justify-content: space-between; margin-top: 50px; font-weight: bold; }
-    .signature-block { text-align: center; }
+    @page {
+      size: A4 portrait;
+      margin: 10mm 10mm 12mm 10mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 15px;
+      color: #0f172a;
+      background: #ffffff;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 3px double #0f172a;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .header-right, .header-left {
+      flex: 1;
+    }
+    .header-center {
+      flex: 2;
+      text-align: center;
+    }
+    .header-logo-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      background: #0f172a;
+      color: #f8fafc;
+      border-radius: 50%;
+      margin-bottom: 4px;
+      font-weight: 900;
+      font-size: 20px;
+    }
+    .project-name {
+      font-size: 19px;
+      font-weight: 800;
+      color: #0f172a;
+      margin: 2px 0;
+      letter-spacing: -0.3px;
+    }
+    .doc-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #2563eb;
+      margin: 0;
+    }
+    .inst-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+    }
+
+    .meta-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+    }
+    .meta-item {
+      font-size: 11.5px;
+      color: #334155;
+    }
+    .meta-item strong {
+      color: #0f172a;
+    }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .kpi-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+    .kpi-card.blue::before { background: #2563eb; }
+    .kpi-card.emerald::before { background: #10b981; }
+    .kpi-card.amber::before { background: #f59e0b; }
+    .kpi-card.purple::before { background: #8b5cf6; }
+
+    .kpi-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 3px;
+    }
+    .kpi-val {
+      font-size: 18px;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.2;
+    }
+    .kpi-sub {
+      font-size: 10.5px;
+      color: #64748b;
+      margin-top: 3px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+    th {
+      background-color: #0f172a;
+      color: #ffffff;
+      padding: 8px 6px;
+      font-weight: 700;
+      border: 1px solid #0f172a;
+      text-align: center;
+      font-size: 11.5px;
+    }
+    td {
+      border: 1px solid #e2e8f0;
+      padding: 7px 6px;
+      vertical-align: middle;
+      text-align: ${isAr ? 'right' : 'left'};
+    }
+    tr:nth-child(even) {
+      background-color: #fbfcfe;
+    }
+    .task-done {
+      background-color: #f0fdf4 !important;
+    }
+    .task-row:hover {
+      background-color: #f1f5f9;
+    }
+
+    .category-banner-row td {
+      background: #0f172a !important;
+      color: #ffffff !important;
+      padding: 6px 12px !important;
+      border: 1px solid #0f172a;
+    }
+    .category-banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .cat-name {
+      font-weight: 800;
+      font-size: 12.5px;
+      letter-spacing: 0.2px;
+    }
+    .cat-pill {
+      font-size: 10.5px;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .badge-auto {
+      font-size: 9.5px;
+      color: #2563eb;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-right: 5px;
+      font-weight: normal;
+      display: inline-block;
+    }
+
+    .prog-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .prog-val {
+      font-size: 11.5px;
+      font-weight: 800;
+      direction: ltr;
+    }
+    .prog-track {
+      width: 68px;
+      height: 5px;
+      background-color: #e2e8f0;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .prog-fill {
+      height: 100%;
+      border-radius: 3px;
+    }
+
+    tfoot tr {
+      background: #0f172a !important;
+      color: #ffffff;
+      font-weight: bold;
+    }
+    tfoot td {
+      border: 1px solid #0f172a;
+      padding: 9px 8px;
+    }
+
+    .signatures {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 25px;
+      page-break-inside: avoid;
+    }
+    .sig-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      background: #fafafa;
+    }
+    .sig-role {
+      font-weight: 700;
+      font-size: 12px;
+      color: #0f172a;
+      margin-bottom: 2px;
+    }
+    .sig-sub {
+      font-size: 10px;
+      color: #64748b;
+      margin-bottom: 25px;
+    }
+    .sig-line {
+      border-top: 1px dashed #94a3b8;
+      padding-top: 4px;
+      font-size: 10px;
+      color: #64748b;
+    }
+
     @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body {
+        padding: 0;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      tr { page-break-inside: avoid; }
+      .signatures { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-  <h1>مشروع الجندي المجهول</h1>
-  <h3>الجدول العام لتقدم العمل بالمشروع</h3>
-  <div style="text-align: left; margin-bottom: 10px; font-weight: bold;">تاريخ الإصدار: ${new Date().toLocaleDateString('en-GB')}</div>
+  <div class="report-header">
+    <div class="header-right" style="text-align:${isAr ? 'right' : 'left'};">
+      <div class="inst-name">جمهورية العراق</div>
+      <div class="inst-name">أمانة بغداد - دائرة المشاريع</div>
+      <div class="inst-name" style="font-size:10.5px;color:#64748b;">نظام الإدارة الهندسية الذكي</div>
+    </div>
+    <div class="header-center">
+      <div class="header-logo-badge">🏛️</div>
+      <h1 class="project-name">مشروع تأهيل وصيانة النصب التذكاري للجندي المجهول</h1>
+      <h2 class="doc-title">الجدول العام لتقدم العمل بالمشروع ونسب الإنجاز التراكمية</h2>
+    </div>
+    <div class="header-left" style="text-align:${isAr ? 'left' : 'right'};">
+      <div class="inst-name">دائرة المهندس المقيم</div>
+      <div class="inst-name" style="color:#047857;font-weight:700;">موقف رسمي معتمد</div>
+      <div class="inst-name" style="font-size:10.5px;color:#64748b;">كود الوثيقة: PRG-${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}</div>
+    </div>
+  </div>
+
+  <div class="meta-bar">
+    <div class="meta-item"><strong>تاريخ التقرير:</strong> ${currentDate}</div>
+    <div class="meta-item"><strong>وقت الإصدار:</strong> ${currentTime}</div>
+    <div class="meta-item"><strong>المهندس المسؤول:</strong> ${user?.name || (isAr ? 'المهندس المقيم' : 'Resident Engineer')}</div>
+    <div class="meta-item"><strong>إجمالي الفقرات:</strong> ${totalTasks} فقرة (${safeCategories.length} تصنيفات)</div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi-card emerald">
+      <div class="kpi-title">🏆 نسبة الإنجاز الكلية للمشروع</div>
+      <div class="kpi-val" style="color:#047857;">${overallProg}%</div>
+      <div class="kpi-sub">المعدل التراكمي الشامل لكافة الأعمال</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-title">📋 حالة الفقرات التنفيذية</div>
+      <div class="kpi-val" style="font-size:16px;">
+        <span style="color:#047857;">منجز: ${completedTasks}</span> | <span style="color:#d97706;">قيد العمل: ${inProgressTasks}</span>
+      </div>
+      <div class="kpi-sub">لم تبدأ بعد: ${notStartedTasks} فقرة</div>
+    </div>
+    <div class="kpi-card amber">
+      <div class="kpi-title">🏛️ أعمال المرمر والنزلات</div>
+      <div class="kpi-val" style="font-size:16px;">
+        نزلات: ${nazalatDone} / ${nazalatTot}
+      </div>
+      <div class="kpi-sub">مرمر مطبق: ${appliedMarble.toLocaleString()} قطعة</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-title">🔷 تقدم أعمال الماربلكس والستيل</div>
+      <div class="kpi-val" style="font-size:15px;color:#6d28d9;">
+        ألواح: ${Number(mbxPiecesDone).toLocaleString()} (${mbxPiecesProg}%)
+      </div>
+      <div class="kpi-sub">ستيل: ${Number(mbxSteelDone).toLocaleString()} / ${Number(mbxSteelTot).toLocaleString()} (${mbxSteelProg}%)</div>
+    </div>
+  </div>
+
   <table>
     <thead>
       <tr>
+        <th style="width: 38px;">#</th>
         <th>الفقرة التنفيذية</th>
-        <th>الكمية الكلية</th>
-        <th>المنجز</th>
-        <th>المتبقي</th>
-        <th>نسبة الإنجاز</th>
-        <th>الملاحظات</th>
+        <th style="width: 65px;">الوحدة</th>
+        <th style="width: 95px;">الكمية الكلية</th>
+        <th style="width: 95px;">المنجز الفعلي</th>
+        <th style="width: 95px;">المتبقي</th>
+        <th style="width: 120px;">نسبة الإنجاز</th>
+        <th>الملاحظات والموقف التنفيذي</th>
       </tr>
     </thead>
-    <tbody>${rows}</tbody>
+    <tbody>
+      ${rowsHTML}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="text-align:center;padding:9px;font-size:13px;letter-spacing:0.3px;">
+          ★ المحصلة الإجمالية ومعدل تقدم المشروع العام:
+        </td>
+        <td style="text-align:center;padding:9px;">${totalTasks} فقرة</td>
+        <td style="text-align:center;padding:9px;color:#34d399;">منجز: ${completedTasks}</td>
+        <td style="text-align:center;padding:9px;color:#fbbf24;">قيد العمل: ${inProgressTasks}</td>
+        <td style="text-align:center;padding:9px;background:#1e293b;color:#38bdf8;font-size:14px;direction:ltr;">
+          ${overallProg}%
+        </td>
+        <td style="font-size:11px;color:#cbd5e1;">الموقف العام معتمد ومطابق لجرودات الموقع</td>
+      </tr>
+    </tfoot>
   </table>
-  <div class="print-footer">
-    <div class="signature-block">المهندس المقيم<br/><br/>.......................</div>
-    <div class="signature-block">مدير المشروع<br/><br/>.......................</div>
+
+  <div class="signatures">
+    <div class="sig-card">
+      <div class="sig-role">مهندس الموقع والمتابعة الميدانية</div>
+      <div class="sig-sub">Site Engineer</div>
+      <div class="sig-line">التوقيع والتاريخ: .......................................</div>
+    </div>
+    <div class="sig-card">
+      <div class="sig-role">المهندس المقيم للمشروع</div>
+      <div class="sig-sub">Resident Engineer</div>
+      <div class="sig-line">التوقيع والتاريخ: .......................................</div>
+    </div>
+    <div class="sig-card">
+      <div class="sig-role">مدير المشروع / دائرة المهندس المقيم</div>
+      <div class="sig-sub">Project Director / Supervision Authority</div>
+      <div class="sig-line">الختم والمصادقة: .......................................</div>
+    </div>
   </div>
-  <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); }</script>
+
+  <script>
+    window.onload = function() {
+      setTimeout(() => {
+        window.print();
+        window.close();
+      }, 500);
+    };
+  </script>
 </body>
 </html>`;
 
@@ -230,7 +660,7 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
         document.body.removeChild(printFrame);
       }, 15000);
     } else {
-      const printWindow = window.open('', '_blank');
+      const printWindow = window.open('', '_blank', 'width=1150,height=900');
       if (printWindow) {
         printWindow.document.open();
         printWindow.document.write(html);
@@ -731,6 +1161,49 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr style={{
+                background: 'rgba(15, 23, 42, 0.85)',
+                borderTop: '2px solid var(--accent, #3b82f6)',
+                fontWeight: 'bold',
+                color: 'var(--fg)'
+              }}>
+                <td colSpan="2" style={{ padding: '0.85rem 1rem', fontSize: '0.95rem', ...textDirectionStyle }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ color: 'var(--accent)', fontWeight: '800' }}>★</span>
+                    <span>{isAr ? 'المحصلة الإجمالية لكافة فقرات المشروع' : 'Total Project Summary'}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 'normal' }}>
+                      ({safeTasks.length} {isAr ? 'فقرة' : 'tasks'} - {safeCategories.length} {isAr ? 'تصنيفات' : 'categories'})
+                    </span>
+                  </div>
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.85rem 0.5rem', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                  {safeCategories.length} {isAr ? 'تصنيفات' : 'cats'}
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.85rem 0.5rem', color: 'var(--success)', fontSize: '0.9rem' }}>
+                  {safeTasks.filter(t => (Number(t.progress_percent) || 0) >= 100).length} {isAr ? 'مكتملة' : 'done'}
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.85rem 0.5rem', color: 'var(--warning, #f59e0b)', fontSize: '0.9rem' }}>
+                  {safeTasks.filter(t => (Number(t.progress_percent) || 0) < 100).length} {isAr ? 'قيد العمل' : 'in progress'}
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.85rem 0.5rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                    <span className="tabular-nums" style={{ fontWeight: '800', color: 'var(--accent)', fontSize: '1.05rem' }}>
+                      {(safeKpis.overall_progress_percent !== undefined ? Number(safeKpis.overall_progress_percent) : 0).toFixed(2)}%
+                    </span>
+                    <div className="progress-bar-container" style={{ width: '80px', height: '6px' }}>
+                      <div 
+                        className="progress-bar-fill"
+                        style={{ width: `${Math.min(100, safeKpis.overall_progress_percent || 0)}%`, background: 'var(--accent)' }}
+                      ></div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', ...textDirectionStyle }}>
+                  {isAr ? 'نسبة الإنجاز الكلية للمشروع محسوبة تراكمياً' : 'Cumulative overall project progress'}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </motion.div>

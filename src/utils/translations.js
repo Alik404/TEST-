@@ -551,7 +551,19 @@ const dataTranslations = {
     "مكتمل ومطابق": "Completed & matching",
     "مشربت لغاية النزلة رقم 21": "Grouted up to downspout #21",
     "مشربت لغاية النزلة رقم 19": "Grouted up to downspout #19",
-    "لم يحدد بعد": "Not specified yet"
+    "لم يحدد بعد": "Not specified yet",
+    "أعمال الماربلكس": "Marblex Works",
+    "تطبيق ألواح الماربلكس (القطع)": "Marblex Panels Cladding (Pieces)",
+    "تركيب ستيلات التثبيت للماربلكس": "Marblex Steel Profiles Installation",
+    "جلي وتلميع المرمر بالكريستال": "Marble Polishing & Crystal Buffing",
+    "معالجة وحشو فواصل التمدد (سيكا)": "Expansion Joints Treatment & Sealing (Sika)",
+    "طلاء وحماية الهياكل المعدنية": "Metal Structures Coating & Protection",
+    "ستيل": "steel piece",
+    "تثبيت ألواح الماربلكس لمختلف الزونات (محدث تلقائياً مع قسم الماربلكس)": "Marblex panels installation for zones (auto-synced with Marblex section)",
+    "تثبيت المقاطع والستيلات الداعمة (محدث تلقائياً مع قسم الماربلكس)": "Fixing supporting steel profiles (auto-synced with Marblex section)",
+    "مراحل التنعيم والتلميع الميكانيكي بالكريستال": "Mechanical smoothing and crystal buffing stages",
+    "حشو صوصج السيكا المقاوم والاسفنج العازل": "Filling with weather-resistant Sika sausage and backing rod",
+    "طلاء وجهين برايمر وإيبوكسي حماية ضد الصدأ": "Applying 2 coats of primer and anti-corrosion protective epoxy"
   }
 };
 

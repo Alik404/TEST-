@@ -131,12 +131,39 @@ app.get('/api/dashboard', async (req, res) => {
 
     const totalAppliedMarble = computedAppliedWhite + computedAppliedBrown;
 
+    // Dynamic Marblex stats
+    let marblexRows = [];
+    try {
+      marblexRows = await dbAll('SELECT * FROM marblex_progress');
+    } catch (e) {
+      console.warn('Could not fetch marblex_progress for dashboard:', e.message);
+    }
+    let mbxTotPieces = 0, mbxAppPieces = 0, mbxTotSteel = 0, mbxAppSteel = 0;
+    marblexRows.forEach(m => {
+      mbxTotPieces += Number(m.total_pieces) || 0;
+      mbxAppPieces += Number(m.applied_pieces) || 0;
+      mbxTotSteel += Number(m.total_steel) || 0;
+      mbxAppSteel += Number(m.applied_steel) || 0;
+    });
+    const mbxPiecesProg = mbxTotPieces > 0 ? parseFloat(((mbxAppPieces / mbxTotPieces) * 100).toFixed(2)) : 0;
+    const mbxSteelProg = mbxTotSteel > 0 ? parseFloat(((mbxAppSteel / mbxTotSteel) * 100).toFixed(2)) : 0;
+
     // Overall Progress Calculation
     let sumProgress = 0;
     tasks.forEach(t => {
       if (t.name === 'تطبيك النزلات (محدث تلقائياً)' && t.is_manual === 0) {
         t.progress_percent = parseFloat(nazalatProgressPercent.toFixed(2));
         t.completed_quantity = totalCompletedNazalat;
+      }
+      if (t.name === 'تطبيق ألواح الماربلكس (القطع)' && t.is_manual === 0) {
+        if (mbxTotPieces > 0) t.total_quantity = mbxTotPieces;
+        t.completed_quantity = mbxAppPieces;
+        t.progress_percent = mbxPiecesProg;
+      }
+      if (t.name === 'تركيب ستيلات التثبيت للماربلكس' && t.is_manual === 0) {
+        if (mbxTotSteel > 0) t.total_quantity = mbxTotSteel;
+        t.completed_quantity = mbxAppSteel;
+        t.progress_percent = mbxSteelProg;
       }
       sumProgress += (Number(t.progress_percent) || 0);
     });
@@ -154,7 +181,13 @@ app.get('/api/dashboard', async (req, res) => {
         skylight_progress_percent: 100.0,
         nazalat_total: totalNazalat,
         nazalat_completed: totalCompletedNazalat,
-        nazalat_progress_percent: parseFloat(nazalatProgressPercent.toFixed(2))
+        nazalat_progress_percent: parseFloat(nazalatProgressPercent.toFixed(2)),
+        total_marblex_pieces: mbxTotPieces,
+        applied_marblex_pieces: mbxAppPieces,
+        marblex_pieces_progress: mbxPiecesProg,
+        total_marblex_steel: mbxTotSteel,
+        applied_marblex_steel: mbxAppSteel,
+        marblex_steel_progress: mbxSteelProg
       }
     });
   } catch (error) {
