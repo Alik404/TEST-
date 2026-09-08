@@ -549,9 +549,25 @@ export const dbRun = async (sql, params = []) => {
         }
       }
 
-      if (sqlClean.includes('UPDATE tasks SET completed_quantity = ?, progress_percent = ? WHERE id = ?')) {
-        const [completed, progress, taskId] = params;
-        const result = await safeSupa(supabase.from('tasks').update({ completed_quantity: completed, progress_percent: progress }).eq('id', taskId));
+      if (sqlClean.includes('UPDATE tasks SET')) {
+        const updateData = {};
+        const paramList = [...params];
+        const taskId = paramList[paramList.length - 1]; // Last parameter is always the WHERE id = ?
+
+        if (sqlClean.includes('completed_quantity = ?') && sqlClean.includes('progress_percent = ?')) {
+          const completedFirst = sqlClean.indexOf('completed_quantity') < sqlClean.indexOf('progress_percent');
+          updateData.completed_quantity = params[completedFirst ? 0 : 1];
+          updateData.progress_percent = params[completedFirst ? 1 : 0];
+          if (sqlClean.includes('notes = ?')) {
+            updateData.notes = params[2];
+          }
+        } else if (sqlClean.includes('notes = ?')) {
+          updateData.notes = params[0];
+        } else if (sqlClean.includes('progress_percent = ?')) {
+          updateData.progress_percent = params[0];
+        }
+
+        const result = await safeSupa(supabase.from('tasks').update(updateData).eq('id', taskId));
         if (result && !result.error) {
           sqliteRun(sql, params).catch(() => {});
           return { changes: 1 };

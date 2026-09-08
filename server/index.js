@@ -330,6 +330,17 @@ app.post('/api/tasks/:id/progress', async (req, res) => {
       }
     }
 
+    const taskUpdates = { progress_percent: progress, completed_quantity: completed };
+    if (notes !== undefined) taskUpdates.notes = notes;
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('tasks').update(taskUpdates).eq('id', id);
+      } catch (e) {
+        console.warn('Supabase tasks update warning:', e.message);
+      }
+    }
+
     let query = 'UPDATE tasks SET progress_percent = ?, completed_quantity = ?';
     const params = [progress, completed];
 
@@ -363,6 +374,13 @@ app.post('/api/tasks/:id/notes', async (req, res) => {
   const { notes } = req.body;
 
   try {
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('tasks').update({ notes }).eq('id', id);
+      } catch (e) {
+        console.warn('Supabase task notes update warning:', e.message);
+      }
+    }
     await dbRun('UPDATE tasks SET notes = ? WHERE id = ?', [notes, id]);
     res.json({ success: true, id, notes });
   } catch (error) {
