@@ -144,7 +144,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 1. Sync Categories
     const catRes = await safeSupa(supabase.from('categories').select('*').order('id', { ascending: true }));
-    if (catRes && !catRes.error && Array.isArray(catRes.data) && catRes.data.length > 0) {
+    if (catRes && !catRes.error && Array.isArray(catRes.data)) {
       await sqliteRun('DELETE FROM categories');
       for (const c of catRes.data) {
         await sqliteRun('INSERT OR REPLACE INTO categories (id, name) VALUES (?, ?)', [c.id, c.name]);
@@ -153,7 +153,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 2. Sync Tasks
     const taskRes = await safeSupa(supabase.from('tasks').select('*').order('id', { ascending: true }));
-    if (taskRes && !taskRes.error && Array.isArray(taskRes.data) && taskRes.data.length > 0) {
+    if (taskRes && !taskRes.error && Array.isArray(taskRes.data)) {
       await sqliteRun('DELETE FROM tasks');
       for (const t of taskRes.data) {
         await sqliteRun(
@@ -165,7 +165,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 3. Sync Sub-units (Nazalat)
     const subRes = await safeSupa(supabase.from('sub_units').select('*').order('serial_number', { ascending: true }));
-    if (subRes && !subRes.error && Array.isArray(subRes.data) && subRes.data.length > 0) {
+    if (subRes && !subRes.error && Array.isArray(subRes.data)) {
       await sqliteRun('DELETE FROM sub_units');
       for (const s of subRes.data) {
         await sqliteRun(
@@ -178,7 +178,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 4. Sync Marble Distribution
     const distRes = await safeSupa(supabase.from('marble_distribution').select('*').order('id', { ascending: true }));
-    if (distRes && !distRes.error && Array.isArray(distRes.data) && distRes.data.length > 0) {
+    if (distRes && !distRes.error && Array.isArray(distRes.data)) {
       await sqliteRun('DELETE FROM marble_distribution');
       for (const m of distRes.data) {
         await sqliteRun(
@@ -190,7 +190,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 5. Sync Daily Updates
     const updatesRes = await safeSupa(supabase.from('daily_updates').select('*').order('created_at', { ascending: true }));
-    if (updatesRes && !updatesRes.error && Array.isArray(updatesRes.data) && updatesRes.data.length > 0) {
+    if (updatesRes && !updatesRes.error && Array.isArray(updatesRes.data)) {
       await sqliteRun('DELETE FROM daily_updates');
       for (const u of updatesRes.data) {
         await sqliteRun(
@@ -202,7 +202,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 6. Sync Materials Consumption
     const matRes = await safeSupa(supabase.from('materials_consumption').select('*').order('date', { ascending: false }));
-    if (matRes && !matRes.error && Array.isArray(matRes.data) && matRes.data.length > 0) {
+    if (matRes && !matRes.error && Array.isArray(matRes.data)) {
       await sqliteRun('DELETE FROM materials_consumption');
       for (const rep of matRes.data) {
         await sqliteRun(
@@ -239,7 +239,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 8. Sync Marblex Progress
     const mbxRes = await safeSupa(supabase.from('marblex_progress').select('*').order('created_at', { ascending: true }));
-    if (mbxRes && !mbxRes.error && Array.isArray(mbxRes.data) && mbxRes.data.length > 0) {
+    if (mbxRes && !mbxRes.error && Array.isArray(mbxRes.data)) {
       await sqliteRun('DELETE FROM marblex_progress');
       for (const m of mbxRes.data) {
         await sqliteRun(
@@ -260,6 +260,20 @@ export const syncFromCloudToLocal = async () => {
           [u.id, u.email, u.password, u.name, u.role]
         );
       }
+    }
+
+    // 10. Sync Weekly Advance (if present in Supabase)
+    const advRes = await safeSupa(supabase.from('weekly_advance').select('*').order('receipt_date', { ascending: false }));
+    if (advRes && !advRes.error && Array.isArray(advRes.data)) {
+      await sqliteRun('DELETE FROM weekly_advance');
+      for (const a of advRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO weekly_advance (id, receipt_date, team_leader, site_name, team_number, data, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [String(a.id), a.receipt_date, a.team_leader, a.site_name, a.team_number, typeof a.data === 'object' ? JSON.stringify(a.data) : (a.data || '{}'), a.created_at]
+        );
+      }
+      saveJsonFallback('weekly_advance.json', advRes.data);
     }
 
     console.log('✅ Local SQLite hydration from Supabase Cloud completed successfully.');
@@ -458,147 +472,31 @@ export const initDatabase = async () => {
       console.log('Default users initialized in SQLite.');
     }
 
-    // Migrate & seed Materials Consumption if SQLite is empty
+    // Sync Materials Consumption if SQLite is empty
     const consumptionCount = await sqliteGet('SELECT COUNT(*) as count FROM materials_consumption');
     if (!consumptionCount || consumptionCount.count === 0) {
-      const historicalReports = [
-        {
-          id: '1787200000001',
-          date: '2026-08-20',
-          day: 'الخميس',
-          start_time: '08:00',
-          end_time: '17:00',
-          prepared_by: 'المهندس علي حاتم',
-          basics: {
-            varnish: { pulled: '15', remaining: '185' },
-            granite_granules: { pulled: '40', remaining: '80' },
-            brown_paint: { pulled: '12', remaining: '28' },
-            gray_base: { pulled: '8', remaining: '24' },
-            putty: { pulled: '6', remaining: '18' },
-            primer: { pulled: '5', remaining: '15' },
-            roller: { pulled: '2', remaining: '21' }
-          },
-          marble: {
-            zone_a: { white: { skiliat: '2', pieces_per_skilia: '198', loose: '45', total: 441 }, brown: { skiliat: '1', pieces_per_skilia: '198', loose: '60', total: 258 } },
-            zone_b: { white: { skiliat: '1', pieces_per_skilia: '198', loose: '20', total: 218 }, brown: { skiliat: '2', pieces_per_skilia: '198', loose: '30', total: 426 } },
-            zone_c: { white: { skiliat: '3', pieces_per_skilia: '198', loose: '80', total: 674 }, brown: { skiliat: '3', pieces_per_skilia: '198', loose: '50', total: 644 } }
-          },
-          sealants: {
-            beige_paint: { pulled: '80', remaining: '242' },
-            white_paint: { pulled: '95', remaining: '310' },
-            primer: { pulled: '10', remaining: '22' },
-            tape: { pulled: '8', remaining: '24' },
-            sponge_1cm: { pulled: '12', remaining: '35' },
-            sponge_2cm: { pulled: '15', remaining: '40' },
-            sponge_3cm: { pulled: '10', remaining: '25' }
-          },
-          bulk: {
-            cement: '45',
-            sand: '12',
-            foam: { pulled: '10', remaining: '40' }
-          },
-          notes: 'تم إنجاز أعمال التطبيك لزون A وزون B وفق المخططات وجرد المخزن مطابق.',
-          created_at: '2026-08-20T14:30:00.000Z'
-        },
-        {
-          id: '1787000000002',
-          date: '2026-08-18',
-          day: 'الثلاثاء',
-          start_time: '08:00',
-          end_time: '16:30',
-          prepared_by: 'المهندس علي حاتم',
-          basics: {
-            varnish: { pulled: '10', remaining: '200' },
-            granite_granules: { pulled: '30', remaining: '120' },
-            brown_paint: { pulled: '8', remaining: '40' },
-            gray_base: { pulled: '5', remaining: '32' },
-            putty: { pulled: '4', remaining: '24' },
-            primer: { pulled: '4', remaining: '20' },
-            roller: { pulled: '1', remaining: '23' }
-          },
-          marble: {
-            zone_a: { white: { skiliat: '1', pieces_per_skilia: '198', loose: '30', total: 228 }, brown: { skiliat: '1', pieces_per_skilia: '198', loose: '20', total: 218 } },
-            zone_b: { white: { skiliat: '1', pieces_per_skilia: '198', loose: '50', total: 248 }, brown: { skiliat: '1', pieces_per_skilia: '198', loose: '40', total: 238 } },
-            zone_c: { white: { skiliat: '2', pieces_per_skilia: '198', loose: '40', total: 436 }, brown: { skiliat: '2', pieces_per_skilia: '198', loose: '35', total: 431 } }
-          },
-          sealants: {
-            beige_paint: { pulled: '60', remaining: '322' },
-            white_paint: { pulled: '70', remaining: '405' },
-            primer: { pulled: '6', remaining: '32' },
-            tape: { pulled: '5', remaining: '32' },
-            sponge_1cm: { pulled: '8', remaining: '47' },
-            sponge_2cm: { pulled: '10', remaining: '55' },
-            sponge_3cm: { pulled: '6', remaining: '35' }
-          },
-          bulk: {
-            cement: '30',
-            sand: '8',
-            foam: { pulled: '6', remaining: '50' }
-          },
-          notes: 'استلام وجبة صوصج بيجي واسفنج 2 سم ومطابقة الكميات المسحوبة.',
-          created_at: '2026-08-18T13:45:00.000Z'
-        },
-        {
-          id: '1781871048975',
-          date: '2026-06-19',
-          day: 'الأحد',
-          start_time: '08:00',
-          end_time: '17:00',
-          prepared_by: 'علي حاتم',
-          basics: {
-            varnish: { pulled: '0', remaining: '200' },
-            granite_granules: { pulled: '0', remaining: '33' },
-            brown_paint: { pulled: '32', remaining: '32' },
-            gray_base: { pulled: '32', remaining: '32' },
-            putty: { pulled: '3', remaining: '23' },
-            primer: { pulled: '0', remaining: '0' },
-            roller: { pulled: '0', remaining: '23' }
-          },
-          marble: {
-            zone_a: { white: { skiliat: '1', pieces_per_skilia: '198', loose: '32', total: 230 }, brown: { skiliat: '1', pieces_per_skilia: '198', loose: '323', total: 521 } },
-            zone_b: { white: { skiliat: '2', pieces_per_skilia: '198', loose: '4423', total: 4819 }, brown: { skiliat: '3', pieces_per_skilia: '198', loose: '43', total: 637 } },
-            zone_c: { white: { skiliat: '3', pieces_per_skilia: '198', loose: '342', total: 936 }, brown: { skiliat: '4', pieces_per_skilia: '198', loose: '43', total: 835 } }
-          },
-          sealants: {
-            beige_paint: { pulled: '323', remaining: '322' },
-            white_paint: { pulled: '32', remaining: '32' },
-            primer: { pulled: '32', remaining: '32' },
-            tape: { pulled: '32', remaining: '32' },
-            sponge_1cm: { pulled: '32', remaining: '3' },
-            sponge_2cm: { pulled: '32', remaining: '32' },
-            sponge_3cm: { pulled: '32', remaining: '32' }
-          },
-          bulk: {
-            cement: '33',
-            sand: '',
-            foam: { pulled: '3', remaining: '343' }
-          },
-          notes: 'تقرير جرد أولي معتمد من الكوادر الفنية.',
-          created_at: '2026-06-19T12:10:48.975Z'
+      if (!isSupabaseActive()) {
+        const jsonReports = getJsonFallback('materials_consumption.json', []);
+        for (const rep of jsonReports) {
+          await sqliteRun(`
+            INSERT INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            rep.id,
+            rep.date,
+            rep.day,
+            rep.start_time || '08:00',
+            rep.end_time || '17:00',
+            rep.prepared_by,
+            typeof rep.basics === 'object' ? JSON.stringify(rep.basics) : (rep.basics || '{}'),
+            typeof rep.marble === 'object' ? JSON.stringify(rep.marble) : (rep.marble || '{}'),
+            typeof rep.sealants === 'object' ? JSON.stringify(rep.sealants) : (rep.sealants || '{}'),
+            typeof rep.bulk === 'object' ? JSON.stringify(rep.bulk) : (rep.bulk || '{}'),
+            rep.notes || '',
+            rep.created_at || new Date().toISOString()
+          ]);
         }
-      ];
-
-      for (const rep of historicalReports) {
-        await sqliteRun(`
-          INSERT INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          rep.id,
-          rep.date,
-          rep.day,
-          rep.start_time || '08:00',
-          rep.end_time || '17:00',
-          rep.prepared_by,
-          JSON.stringify(rep.basics || {}),
-          JSON.stringify(rep.marble || {}),
-          JSON.stringify(rep.sealants || {}),
-          JSON.stringify(rep.bulk || {}),
-          rep.notes || '',
-          rep.created_at || new Date().toISOString()
-        ]);
       }
-      saveJsonFallback('materials_consumption.json', historicalReports);
-      console.log(`Seeded ${historicalReports.length} materials consumption records.`);
     }
 
     // Sync Workers Wages if SQLite is empty
@@ -615,25 +513,26 @@ export const initDatabase = async () => {
       }
     }
 
-    // Migrate & seed Weekly Advance if SQLite is empty
+    // Sync Weekly Advance if SQLite is empty
     const advanceCount = await sqliteGet('SELECT COUNT(*) as count FROM weekly_advance');
     if (!advanceCount || advanceCount.count === 0) {
-      const jsonAdvances = getJsonFallback('weekly_advance.json', []);
-      for (const adv of jsonAdvances) {
-        await sqliteRun(`
-          INSERT INTO weekly_advance (id, receipt_date, team_leader, site_name, team_number, data, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [
-          String(adv.id),
-          adv.receipt_date || '2026-07-26',
-          adv.team_leader || 'خلفة ابو حيدر',
-          adv.site_name || 'موقع الجندي المجهول',
-          adv.team_number || '1',
-          typeof adv.data === 'object' ? JSON.stringify(adv.data) : (adv.data || '{}'),
-          adv.created_at || new Date().toISOString()
-        ]);
+      if (!isSupabaseActive()) {
+        const jsonAdvances = getJsonFallback('weekly_advance.json', []);
+        for (const adv of jsonAdvances) {
+          await sqliteRun(`
+            INSERT INTO weekly_advance (id, receipt_date, team_leader, site_name, team_number, data, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [
+            String(adv.id),
+            adv.receipt_date || '2026-07-26',
+            adv.team_leader || 'خلفة ابو حيدر',
+            adv.site_name || 'موقع الجندي المجهول',
+            adv.team_number || '1',
+            typeof adv.data === 'object' ? JSON.stringify(adv.data) : (adv.data || '{}'),
+            adv.created_at || new Date().toISOString()
+          ]);
+        }
       }
-      console.log(`Migrated ${jsonAdvances.length} weekly advance records to SQLite.`);
     }
 
     // 10. Marblex Progress Table
@@ -664,42 +563,16 @@ export const initDatabase = async () => {
 
     const marblexCount = await sqliteGet('SELECT COUNT(*) as count FROM marblex_progress');
     if (!marblexCount || marblexCount.count === 0) {
-      const jsonList = getJsonFallback('marblex_progress.json', []);
-      if (jsonList && jsonList.length > 0) {
-        for (const m of jsonList) {
-          await sqliteRun(`
-            INSERT OR REPLACE INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, m.pieces_progress, m.total_steel, m.applied_steel, m.steel_progress, m.overall_progress, m.status, m.notes, m.updated_by, m.created_at, m.updated_at]);
+      if (!isSupabaseActive()) {
+        const jsonList = getJsonFallback('marblex_progress.json', []);
+        if (jsonList && jsonList.length > 0) {
+          for (const m of jsonList) {
+            await sqliteRun(`
+              INSERT OR REPLACE INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, m.pieces_progress, m.total_steel, m.applied_steel, m.steel_progress, m.overall_progress, m.status, m.notes, m.updated_by, m.created_at, m.updated_at]);
+          }
         }
-        console.log(`Restored ${jsonList.length} marblex progress records from json fallback.`);
-      } else if (!isSupabaseActive()) {
-        const defaultMarblex = [
-          { id: 'mbx-1', zone: 'Zone A', item_name: 'جدار الواجهة الرئيسي A-1', total_pieces: 120, applied_pieces: 120, total_steel: 60, applied_steel: 60, notes: 'مكتمل ومفحوص موقعياً بالكامل' },
-          { id: 'mbx-2', zone: 'Zone A', item_name: 'قاطع المدخل A-2', total_pieces: 95, applied_pieces: 80, total_steel: 45, applied_steel: 35, notes: 'استمرار تركيب وتثبيت الستيلات' },
-          { id: 'mbx-3', zone: 'Zone B1', item_name: 'جدار الممشى الداخلي B1-1', total_pieces: 150, applied_pieces: 110, total_steel: 75, applied_steel: 50, notes: 'توريد دفعة الستيل الإضافية' },
-          { id: 'mbx-4', zone: 'Zone B1', item_name: 'قاطع بهو الاستقبال B1-2', total_pieces: 80, applied_pieces: 40, total_steel: 40, applied_steel: 20, notes: 'قيد تثبيت الهيكل الحامل' },
-          { id: 'mbx-5', zone: 'Zone B2', item_name: 'جدار الصالة الخلفية B2-1', total_pieces: 140, applied_pieces: 70, total_steel: 70, applied_steel: 35, notes: 'تم استلام الشاقول والمناسيب الهندسية' },
-          { id: 'mbx-6', zone: 'Zone B2', item_name: 'قواطع الممرات الجانبية B2-2', total_pieces: 90, applied_pieces: 0, total_steel: 45, applied_steel: 0, notes: 'بانتظار إكمال أعمال التأسيسات' },
-          { id: 'mbx-7', zone: 'Zone C', item_name: 'جدار القاعة الكبرى C-1', total_pieces: 200, applied_pieces: 160, total_steel: 100, applied_steel: 80, notes: 'نسبة تقدم ممتازة ومطابقة للمواصفة' },
-          { id: 'mbx-8', zone: 'Zone C', item_name: 'قاطع الكاليري C-2', total_pieces: 110, applied_pieces: 0, total_steel: 55, applied_steel: 0, notes: 'متبقي، لم تبدأ الأعمال بعد' }
-        ];
-
-        for (const m of defaultMarblex) {
-          const pProg = m.total_pieces > 0 ? parseFloat(((m.applied_pieces / m.total_pieces) * 100).toFixed(2)) : 0;
-          const sProg = m.total_steel > 0 ? parseFloat(((m.applied_steel / m.total_steel) * 100).toFixed(2)) : 0;
-          const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
-          let status = 'قيد التنفيذ';
-          if (oProg >= 100) status = 'منجز';
-          else if (oProg === 0) status = 'غير مطبق';
-
-          await sqliteRun(`
-            INSERT INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, pProg, m.total_steel, m.applied_steel, sProg, oProg, status, m.notes, 'المهندس المقيم']);
-        }
-        saveJsonFallback('marblex_progress.json', defaultMarblex);
-        console.log(`Seeded ${defaultMarblex.length} marblex progress records.`);
       }
     }
 

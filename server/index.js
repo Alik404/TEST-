@@ -474,7 +474,7 @@ app.get('/api/daily-updates', async (req, res) => {
           .from('daily_updates')
           .select('*')
           .order('created_at', { ascending: true });
-        if (data && !error && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           return res.json(data);
         }
       } catch (e) {
@@ -554,6 +554,22 @@ app.post('/api/daily-updates', async (req, res) => {
       [user_id || null, sender_name, sender_role, message_text || '', media_url, media_type, reply_to_id || null]
     );
 
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('daily_updates').insert([{
+          user_id: user_id || null,
+          sender_name,
+          sender_role,
+          message_text: message_text || '',
+          media_url,
+          media_type,
+          reply_to_id: reply_to_id || null
+        }]);
+      } catch (supaErr) {
+        console.warn('Supabase daily update sync warning:', supaErr.message);
+      }
+    }
+
     const newMessage = await sqliteGet(`
       SELECT d.*, u.name as user_name, u.role as user_role,
              r.sender_name as reply_sender_name, r.message_text as reply_message_text, r.media_url as reply_media_url, r.media_type as reply_media_type
@@ -580,13 +596,13 @@ app.get('/api/materials-consumption', async (req, res) => {
           .select('*')
           .order('date', { ascending: false })
           .order('created_at', { ascending: false });
-        if (data && !error && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           const parsed = data.map(r => ({
             ...r,
-            basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : r.basics,
-            marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : r.marble,
-            sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : r.sealants,
-            bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : r.bulk,
+            basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : (r.basics || {}),
+            marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : (r.marble || {}),
+            sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : (r.sealants || {}),
+            bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : (r.bulk || {}),
           }));
           return res.json(parsed);
         }
@@ -929,6 +945,25 @@ app.delete('/api/workers-wages/:id', async (req, res) => {
 // ── 9. Weekly Advance API Endpoints ─────────────────────────────────────────
 app.get('/api/weekly-advance', async (req, res) => {
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('weekly_advance')
+          .select('*')
+          .order('receipt_date', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data)) {
+          const parsed = data.map(r => ({
+            ...r,
+            data: typeof r.data === 'string' ? JSON.parse(r.data || '{}') : r.data
+          }));
+          return res.json(parsed);
+        }
+      } catch (e) {
+        // Fall through to SQLite if table not available
+      }
+    }
+
     const rows = await sqliteAll('SELECT * FROM weekly_advance ORDER BY receipt_date DESC, created_at DESC');
     const parsed = rows.map(r => ({
       ...r,
@@ -944,6 +979,20 @@ app.get('/api/weekly-advance', async (req, res) => {
 app.get('/api/weekly-advance/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('weekly_advance')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (!error && data) {
+          data.data = typeof data.data === 'string' ? JSON.parse(data.data || '{}') : data.data;
+          return res.json(data);
+        }
+      } catch (e) {}
+    }
+
     const row = await sqliteGet('SELECT * FROM weekly_advance WHERE id = ?', [id]);
     if (!row) {
       return res.status(404).json({ error: 'السجل غير موجود.' });
@@ -1017,6 +1066,19 @@ app.put('/api/weekly-advance/:id', async (req, res) => {
     if (idx !== -1) {
       jsonList[idx] = { ...jsonList[idx], receipt_date, team_leader, site_name, team_number, data: formData, updated_at: updatedAt };
       saveJsonFallback('weekly_advance.json', jsonList);
+    }
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('weekly_advance').update({
+          receipt_date,
+          team_leader,
+          site_name,
+          team_number,
+          data: formData,
+          updated_at: updatedAt
+        }).eq('id', id);
+      } catch {}
     }
 
     res.json({ id, receipt_date, team_leader, site_name, team_number, data: formData, updated_at: updatedAt });
@@ -1289,7 +1351,7 @@ app.get('/api/users', async (req, res) => {
           .from('users')
           .select('id, email, name, role, password')
           .order('id', { ascending: true });
-        if (data && !error && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           return res.json(data);
         }
       } catch (e) {
