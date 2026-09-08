@@ -219,16 +219,24 @@ export default function App() {
           progress_percent: progressPercent, 
           notes,
           completed_quantity: completedQuantity,
-          userName: user.name,
-          userRole: user.role
+          userName: user?.name || 'المهندس المقيم',
+          userRole: user?.role || 'admin'
         }),
       });
 
-      if (!response.ok) throw new Error('فشل تحديث نسبة الإنجاز.');
+      if (!response.ok) {
+        let errMsg = 'فشل تحديث نسبة الإنجاز.';
+        try {
+          const errJson = await response.json();
+          if (errJson?.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
       await fetchData();
-      showToast(lang === 'ar' ? 'تم تحديث نسبة الإنجاز' : 'Progress updated successfully');
+      showToast(lang === 'ar' ? 'تم حفظ وتحديث نسبة الإنجاز' : 'Progress updated successfully');
     } catch (err) {
-      showToast(err.message, 'error');
+      showToast(err.message || 'فشل تحديث نسبة الإنجاز.', 'error');
       throw err;
     }
   };
