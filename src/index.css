@@ -3878,3 +3878,83 @@ html[dir="ltr"] .user-profile { padding: 6px 6px 6px 14px; }
   -webkit-backdrop-filter: blur(16px);
 }
 
+/* ── Bento Grid Responsive Spans ───────────────────────────────── */
+.bento-span-2 {
+  grid-column: span 2 / span 2;
+}
+@media (max-width: 1023px) {
+  .bento-span-2 {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+/* ── Touch Cards Styling (Marblex & Tasks) ─────────────────────── */
+.marblex-touch-card,
+.task-touch-card {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+@media (hover: hover) {
+  .marblex-touch-card:hover,
+  .task-touch-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--accent-border) !important;
+  }
+}
+.marblex-touch-card:active,
+.task-touch-card:active {
+  transform: scale(0.98);
+}
+
+/* ── Enhanced Table Responsive Scrolling ───────────────────────── */
+.table-responsive {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.table-responsive::-webkit-scrollbar {
+  height: 6px;
+}
+.table-responsive::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+.table-responsive::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* ── Mobile Modal Bottom Sheet Transformation ──────────────────── */
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  .modal-overlay > .glass-panel,
+  .modal-overlay > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    border-radius: 24px 24px 0 0 !important;
+    max-height: 88vh !important;
+    padding: 1.5rem !important;
+    animation: mobile-sheet-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes mobile-sheet-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  /* Tap targets for mobile accessibility */
+  button:not(.mobile-nav-item),
+  .btn,
+  .input-field,
+  select,
+  .filter-btn {
+    min-height: 42px;
+  }
+}
+
+

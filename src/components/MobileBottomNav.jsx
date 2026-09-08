@@ -11,28 +11,34 @@ export default function MobileBottomNav({ activeTab, setActiveTab, lang, user })
 
   const primaryItems = [
     { id: 'dashboard',  label: isAr ? 'الرئيسية' : 'Home',     icon: LayoutDashboard },
+    { id: 'marblex',    label: isAr ? 'الماربلكس' : 'Marblex',  icon: Boxes           },
     { id: 'tracking',   label: isAr ? 'النزلات'  : 'Tracking',  icon: ClipboardList   },
     { id: 'marble',     label: isAr ? 'المرمر'   : 'Marble',    icon: Layers          },
-    { id: 'daily-updates', label: isAr ? 'التحديثات' : 'Updates', icon: MessageSquare  },
   ];
 
-  const moreItems = [
-    { id: 'marblex',               label: isAr ? 'أعمال الماربلكس' : 'Marblex',          icon: Boxes     },
-    { id: 'executive-summary',     label: isAr ? 'التقرير التنفيذي' : 'Executive',       icon: BarChart3 },
-    { id: 'materials-consumption', label: isAr ? 'استهلاك المواد'   : 'Materials',        icon: FileText  },
-    { id: 'workers-wages',         label: isAr ? 'أجور العمال'     : 'Wages',            icon: Banknote  },
-    { id: 'weekly-advance',        label: isAr ? 'سلفة مقدمة'      : 'Advance',          icon: Receipt   },
+  const reportModules = [
+    { id: 'executive-summary',     label: isAr ? 'التقرير التنفيذي' : 'Executive Report', icon: BarChart3, color: '#3b82f6' },
+    { id: 'materials-consumption', label: isAr ? 'استهلاك المواد'   : 'Materials',        icon: FileText,  color: '#10b981' },
+    { id: 'daily-updates',         label: isAr ? 'التحديث اليومي'  : 'Daily Log',         icon: MessageSquare, color: '#f59e0b' },
   ];
 
+  const financeModules = [
+    { id: 'workers-wages',         label: isAr ? 'أجور العمال'     : 'Workers Wages',    icon: Banknote,  color: '#8b5cf6' },
+    { id: 'weekly-advance',        label: isAr ? 'سلفة مقدمة'      : 'Advance Payment',  icon: Receipt,   color: '#ec4899' },
+  ];
+
+  const adminModules = [];
   if (user?.role === 'super_admin' || user?.role === 'admin') {
-    moreItems.push({
+    adminModules.push({
       id: 'users-management',
-      label: isAr ? 'إدارة الحسابات' : 'Users',
-      icon: Users
+      label: isAr ? 'إدارة الحسابات' : 'Users Management',
+      icon: Users,
+      color: '#06b6d4'
     });
   }
 
-  const isMoreActive = moreItems.some(item => item.id === activeTab);
+  const allMoreModules = [...reportModules, ...financeModules, ...adminModules];
+  const isMoreActive = allMoreModules.some(item => item.id === activeTab);
 
   return (
     <>
@@ -52,14 +58,17 @@ export default function MobileBottomNav({ activeTab, setActiveTab, lang, user })
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', stiffness: 350, damping: 32 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 34 }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mobile-more-handle" onClick={() => setShowMore(false)} />
               <div className="mobile-more-header">
-                <span style={{ fontWeight: '800', fontSize: '1.05rem', color: 'var(--fg)' }}>
-                  {isAr ? 'الأقسام الإضافية' : 'All Modules'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)' }} />
+                  <span style={{ fontWeight: '800', fontSize: '1.05rem', color: 'var(--fg)' }}>
+                    {isAr ? 'كافة أقسام ووحدات المشروع' : 'All Project Modules'}
+                  </span>
+                </div>
                 <button 
                   className="mobile-more-close" 
                   onClick={() => setShowMore(false)}
@@ -68,23 +77,84 @@ export default function MobileBottomNav({ activeTab, setActiveTab, lang, user })
                   <X size={18} />
                 </button>
               </div>
-              <div className="mobile-more-grid">
-                {moreItems.map(({ id, label, icon: Icon }) => (
-                  <motion.button
-                    key={id}
-                    className={`mobile-more-item ${activeTab === id ? 'active' : ''}`}
-                    onClick={() => { 
-                      setActiveTab(id); 
-                      setShowMore(false); 
-                    }}
-                    whileTap={{ scale: 0.94 }}
-                  >
-                    <div className="mobile-more-icon">
-                      <Icon size={22} strokeWidth={activeTab === id ? 2.5 : 1.75} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxHeight: '68vh', overflowY: 'auto', paddingBottom: '1rem' }}>
+                {/* Section 1: Reports & Supervision */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.65rem' }}>
+                    {isAr ? 'التقارير والمتابعة الميدانية' : 'Reports & Site Tracking'}
+                  </div>
+                  <div className="mobile-more-grid">
+                    {reportModules.map(({ id, label, icon: Icon, color }) => (
+                      <motion.button
+                        key={id}
+                        className={`mobile-more-item ${activeTab === id ? 'active' : ''}`}
+                        onClick={() => { 
+                          setActiveTab(id); 
+                          setShowMore(false); 
+                        }}
+                        whileTap={{ scale: 0.94 }}
+                      >
+                        <div className="mobile-more-icon" style={{ background: activeTab === id ? 'var(--accent)' : 'var(--surface-warm)', color: activeTab === id ? '#ffffff' : color }}>
+                          <Icon size={20} strokeWidth={activeTab === id ? 2.5 : 2} />
+                        </div>
+                        <span className="mobile-more-label">{label}</span>
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 2: Finance & Workers */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.65rem' }}>
+                    {isAr ? 'الشؤون المالية وأجور العمال' : 'Finance & Site Wages'}
+                  </div>
+                  <div className="mobile-more-grid">
+                    {financeModules.map(({ id, label, icon: Icon, color }) => (
+                      <motion.button
+                        key={id}
+                        className={`mobile-more-item ${activeTab === id ? 'active' : ''}`}
+                        onClick={() => { 
+                          setActiveTab(id); 
+                          setShowMore(false); 
+                        }}
+                        whileTap={{ scale: 0.94 }}
+                      >
+                        <div className="mobile-more-icon" style={{ background: activeTab === id ? 'var(--accent)' : 'var(--surface-warm)', color: activeTab === id ? '#ffffff' : color }}>
+                          <Icon size={20} strokeWidth={activeTab === id ? 2.5 : 2} />
+                        </div>
+                        <span className="mobile-more-label">{label}</span>
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 3: Administration if Admin */}
+                {adminModules.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.65rem' }}>
+                      {isAr ? 'إدارة النظام والصلاحيات' : 'System Administration'}
                     </div>
-                    <span className="mobile-more-label">{label}</span>
-                  </motion.button>
-                ))}
+                    <div className="mobile-more-grid">
+                      {adminModules.map(({ id, label, icon: Icon, color }) => (
+                        <motion.button
+                          key={id}
+                          className={`mobile-more-item ${activeTab === id ? 'active' : ''}`}
+                          onClick={() => { 
+                            setActiveTab(id); 
+                            setShowMore(false); 
+                          }}
+                          whileTap={{ scale: 0.94 }}
+                        >
+                          <div className="mobile-more-icon" style={{ background: activeTab === id ? 'var(--accent)' : 'var(--surface-warm)', color: activeTab === id ? '#ffffff' : color }}>
+                            <Icon size={20} strokeWidth={activeTab === id ? 2.5 : 2} />
+                          </div>
+                          <span className="mobile-more-label">{label}</span>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>

@@ -10,7 +10,9 @@ import {
   Clock,
   Save,
   MessageSquare,
-  Printer
+  Printer,
+  LayoutGrid,
+  Table
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -32,6 +34,7 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
   const [tempCompleted, setTempCompleted] = useState({});
   const [tempNotes, setTempNotes] = useState({});
   const [savingId, setSavingId] = useState(null);
+  const [taskViewMode, setTaskViewMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'));
 
   // Safeguard props against null or undefined values to prevent UI crash
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -978,6 +981,59 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
                 {t('tableInstruction')}
               </span>
             )}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: 'var(--surface-warm)',
+              padding: '3px',
+              borderRadius: 'var(--radius-pill)',
+              border: '1px solid var(--border)',
+              flexShrink: 0
+            }}>
+              <button
+                type="button"
+                onClick={() => setTaskViewMode('table')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  border: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  background: taskViewMode === 'table' ? 'var(--accent)' : 'transparent',
+                  color: taskViewMode === 'table' ? '#ffffff' : 'var(--muted)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Table size={14} />
+                <span>{isAr ? 'جدول' : 'Table'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTaskViewMode('cards')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  border: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  background: taskViewMode === 'cards' ? 'var(--accent)' : 'transparent',
+                  color: taskViewMode === 'cards' ? '#ffffff' : 'var(--muted)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <LayoutGrid size={14} />
+                <span>{isAr ? 'كروت' : 'Cards'}</span>
+              </button>
+            </div>
+
             <button
               onClick={handlePrintProgressReport}
               className="btn btn-secondary"
@@ -989,6 +1045,181 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
           </div>
         </div>
 
+        {taskViewMode === 'cards' ? (
+          <div className="dashboard-tasks-cards-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {categories.map((cat) => {
+              const catTasks = groupedTasks[cat.name] || [];
+              if (catTasks.length === 0) return null;
+
+              return (
+                <div key={cat.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {/* Category Banner */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 1rem',
+                    background: 'var(--surface-warm)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)'
+                  }}>
+                    <span style={{ fontWeight: '800', color: 'var(--fg)', fontSize: '0.95rem' }}>
+                      📁 {translateText(cat.name, lang)}
+                    </span>
+                    <span className="badge" style={{ fontSize: '0.75rem' }}>
+                      {catTasks.length} {isAr ? 'فقرات' : 'tasks'}
+                    </span>
+                  </div>
+
+                  {/* Tasks in Category Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '0.85rem' }}>
+                    {catTasks.map((task) => {
+                      const isEditing = editingTask === task.id;
+                      const hasQty = task.total_quantity !== null && task.total_quantity > 0;
+                      const unitTrans = translateText(task.unit, lang);
+                      const qtyDisplay = hasQty ? `${task.total_quantity.toLocaleString()} ${unitTrans}` : '-';
+                      
+                      let compDisplay = '-';
+                      let pendDisplay = '-';
+                      if (hasQty) {
+                        if (task.name === 'تطبيك النزلات (محدث تلقائياً)' && task.is_manual === 0) {
+                          compDisplay = `${kpis.nazalat_completed} ${unitTrans}`;
+                          pendDisplay = `${kpis.nazalat_total - kpis.nazalat_completed} ${unitTrans}`;
+                        } else {
+                          compDisplay = `${task.completed_quantity.toLocaleString()} ${unitTrans}`;
+                          pendDisplay = `${(task.total_quantity - task.completed_quantity).toLocaleString()} ${unitTrans}`;
+                        }
+                      }
+
+                      const prog = Number(task.progress_percent) || 0;
+                      const isDone = prog >= 100;
+                      const canEdit = (user.role === 'admin' || user.role === 'super_admin') && task.is_manual;
+
+                      return (
+                        <div
+                          key={task.id}
+                          className="glass-panel task-touch-card"
+                          onClick={() => !isEditing && canEdit && handleEditClick(task)}
+                          style={{
+                            padding: '1.15rem',
+                            borderRadius: 'var(--radius-lg)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.75rem',
+                            border: isDone ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border)',
+                            cursor: canEdit ? 'pointer' : 'default',
+                            position: 'relative'
+                          }}
+                        >
+                          {/* Top */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                {!task.is_manual && (
+                                  <span style={{
+                                    fontSize: '0.68rem',
+                                    color: 'var(--accent)',
+                                    padding: '1px 6px',
+                                    borderRadius: 'var(--radius-pill)',
+                                    border: '1px solid var(--accent)',
+                                    fontWeight: '700'
+                                  }}>
+                                    {t('badgeAuto')}
+                                  </span>
+                                )}
+                              </div>
+                              <h4 style={{ fontSize: '1rem', fontWeight: '800', color: 'var(--fg)', margin: '0.35rem 0 0 0', lineHeight: 1.3 }}>
+                                {translateText(task.name, lang)}
+                              </h4>
+                            </div>
+
+                            <div style={{
+                              padding: '0.35rem 0.65rem',
+                              borderRadius: 'var(--radius-md)',
+                              background: isDone ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.12)',
+                              color: isDone ? 'var(--success)' : 'var(--accent)',
+                              fontWeight: '900',
+                              fontSize: '1rem',
+                              direction: 'ltr',
+                              flexShrink: 0
+                            }}>
+                              {prog.toFixed(1)}%
+                            </div>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, prog)}%`, height: '100%', background: isDone ? 'var(--success)' : 'var(--accent)', transition: 'width 0.4s ease' }} />
+                          </div>
+
+                          {/* Quantities 3-Column Grid */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', background: 'var(--surface-warm)', padding: '0.65rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>{t('colTotalQty')}</div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: '700', color: 'var(--fg)', marginTop: '2px' }}>{qtyDisplay}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--success)' }}>{t('colCompleted')}</div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: '700', color: 'var(--success)', marginTop: '2px' }}>{compDisplay}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--warning, #f59e0b)' }}>{t('colRemaining')}</div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: '700', color: 'var(--warning, #f59e0b)', marginTop: '2px' }}>{pendDisplay}</div>
+                            </div>
+                          </div>
+
+                          {/* Notes / Edit */}
+                          {isEditing ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <input
+                                  type="number"
+                                  className="input-number"
+                                  value={tempCompleted[task.id] !== undefined ? tempCompleted[task.id] : (task.completed_quantity ?? 0)}
+                                  onChange={(e) => handleCompletedChange(task, e.target.value)}
+                                  placeholder={isAr ? 'المنجز' : 'Completed'}
+                                  style={{ flex: 1, padding: '0.4rem', textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--fg)' }}
+                                />
+                                <input
+                                  type="text"
+                                  className="notes-input"
+                                  value={tempNotes[task.id] !== undefined ? tempNotes[task.id] : (task.notes || '')}
+                                  onChange={(e) => handleNotesChange(task.id, e.target.value)}
+                                  placeholder={t('enterNotes')}
+                                  style={{ flex: 2, padding: '0.4rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--fg)' }}
+                                />
+                                <button
+                                  onClick={() => handleSaveClick(task.id)}
+                                  className="btn btn-primary"
+                                  style={{ padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)' }}
+                                  disabled={savingId === task.id}
+                                >
+                                  <Save size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--muted)', borderTop: '1px solid var(--border-soft)', paddingTop: '0.45rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <MessageSquare size={13} style={{ flexShrink: 0 }} />
+                                <span>{translateText(task.notes, lang) || '-'}</span>
+                              </div>
+                              {canEdit && (
+                                <span style={{ fontSize: '0.72rem', color: 'var(--accent)', fontWeight: '700' }}>
+                                  {isAr ? 'تعديل ✎' : 'Edit ✎'}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div className="table-responsive">
           <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr' }}>
             <thead>
@@ -1206,6 +1437,7 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
             </tfoot>
           </table>
         </div>
+        )}
       </motion.div>
 
     </motion.div>

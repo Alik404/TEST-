@@ -141,14 +141,14 @@ export default function DashboardBento({ kpis, tasks, lang }) {
         {/* LEFT: Consumption Wide Stream (Simulated 8 cols via flex-basis/grid logic) */}
         <motion.section 
           variants={FADE_UP}
+          className="bento-card bento-span-2"
           style={{
             flex: '2 1 0%',
-            gridColumn: 'span 2 / span 2',
             background: 'var(--surface)',
-            borderRadius: '2.5rem',
+            borderRadius: 'var(--radius-xl)',
             border: '1px solid var(--border)',
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.03)',
-            padding: '2rem',
+            padding: '1.5rem',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -262,16 +262,17 @@ export default function DashboardBento({ kpis, tasks, lang }) {
         {/* RIGHT: Marble Zones (Simulated 4 cols via flex/grid) */}
         <motion.section 
           variants={FADE_UP}
+          className="bento-card"
           style={{
             flex: '1 1 300px',
             background: 'var(--surface)',
-            borderRadius: '2.5rem',
+            borderRadius: 'var(--radius-xl)',
             border: '1px solid var(--border)',
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.03)',
-            padding: '2rem',
+            padding: '1.5rem',
             display: 'flex',
             flexDirection: 'column',
-            gap: '2rem'
+            gap: '1.5rem'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

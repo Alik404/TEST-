@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Layers, Plus, Printer, Search, Edit3, Trash2, CheckCircle2, 
   Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy,
-  Award, TrendingUp
+  Award, TrendingUp, LayoutGrid, Table
 } from 'lucide-react';
 
 export default function MarblexProgress({ user, lang, t }) {
@@ -14,6 +14,9 @@ export default function MarblexProgress({ user, lang, t }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
+  // View mode: 'table' or 'cards' (default to cards on mobile)
+  const [viewMode, setViewMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'));
+
   // Filters
   const [selectedZone, setSelectedZone] = useState('ALL'); // 'ALL' | 'Zone A' | 'Zone B1' | 'Zone B2' | 'Zone C'
   const [selectedStatus, setSelectedStatus] = useState('ALL'); // 'ALL' | 'منجز' | 'قيد التنفيذ' | 'غير مطبق'
@@ -627,39 +630,251 @@ export default function MarblexProgress({ user, lang, t }) {
             ))}
           </div>
 
-          <div style={{ position: 'relative', minWidth: '240px', flex: '1 1 240px', maxWidth: '380px' }}>
-            <Search size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', right: isAr ? '12px' : 'auto', left: isAr ? 'auto' : '12px', color: 'var(--muted)' }} />
-            <input 
-              type="text"
-              placeholder={isAr ? 'بحث باسم المقطع أو الملاحظات...' : 'Search by section or notes...'}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-field"
-              style={{
-                width: '100%',
-                paddingRight: isAr ? '2.2rem' : '0.85rem',
-                paddingLeft: isAr ? '0.85rem' : '2.2rem',
-                paddingTop: '0.45rem',
-                paddingBottom: '0.45rem',
-                fontSize: '0.85rem',
-                borderRadius: 'var(--radius-md)'
-              }}
-            />
+          {/* View Mode Toggle + Search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 320px', justifyContent: isAr ? 'flex-start' : 'flex-end' }}>
+            {/* View Mode Toggle */}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: 'var(--surface-warm)',
+              padding: '3px',
+              borderRadius: 'var(--radius-pill)',
+              border: '1px solid var(--border)',
+              flexShrink: 0
+            }}>
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  border: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  background: viewMode === 'table' ? 'var(--accent)' : 'transparent',
+                  color: viewMode === 'table' ? '#ffffff' : 'var(--muted)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Table size={14} />
+                <span>{isAr ? 'جدول' : 'Table'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  border: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  background: viewMode === 'cards' ? 'var(--accent)' : 'transparent',
+                  color: viewMode === 'cards' ? '#ffffff' : 'var(--muted)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <LayoutGrid size={14} />
+                <span>{isAr ? 'كروت' : 'Cards'}</span>
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 180px', maxWidth: '320px' }}>
+              <Search size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', right: isAr ? '12px' : 'auto', left: isAr ? 'auto' : '12px', color: 'var(--muted)' }} />
+              <input 
+                type="text"
+                placeholder={isAr ? 'بحث باسم المقطع أو الملاحظات...' : 'Search section or notes...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="input-field"
+                style={{
+                  width: '100%',
+                  paddingRight: isAr ? '2.2rem' : '0.85rem',
+                  paddingLeft: isAr ? '0.85rem' : '2.2rem',
+                  paddingTop: '0.45rem',
+                  paddingBottom: '0.45rem',
+                  fontSize: '0.85rem',
+                  borderRadius: 'var(--radius-md)'
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Main Data Table ──────────────────────────────────────── */}
-      <div className="table-responsive glass-panel" style={{ borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: isAr ? 'right' : 'left' }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-warm)', borderBottom: '1px solid var(--border)' }}>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>#</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'المقطع / الجدار' : 'Section Name'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'الزون' : 'Zone'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'القطع المطبقة' : 'Pieces'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'إنجاز القطع' : 'Pieces %'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الستيل المطبق' : 'Steel'}</th>
+      {/* ── Main Data Display: Cards View OR Table View ───────────── */}
+      {viewMode === 'cards' ? (
+        <div className="marblex-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '1rem' }}>
+          {loading ? (
+            <div className="glass-panel" style={{ gridColumn: '1 / -1', padding: '3.5rem', textAlign: 'center', borderRadius: 'var(--radius-xl)' }}>
+              <RefreshCw className="spin-animation" size={26} style={{ color: 'var(--accent)', margin: '0 auto 0.65rem auto' }} />
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{isAr ? 'جاري تحميل سجلات الماربلكس...' : 'Loading marblex records...'}</p>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="glass-panel" style={{ gridColumn: '1 / -1', padding: '3.5rem', textAlign: 'center', borderRadius: 'var(--radius-xl)' }}>
+              <Layers size={36} style={{ margin: '0 auto 0.65rem auto', opacity: 0.4 }} />
+              <p style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--fg)' }}>{isAr ? 'لا توجد سجلات تطابق الفلتر المختار' : 'No records found'}</p>
+              {isAdmin && (
+                <button onClick={handleOpenCreate} className="btn btn-primary" style={{ marginTop: '0.85rem', fontSize: '0.85rem', padding: '0.55rem 1.25rem' }}>
+                  <Plus size={16} style={{ marginLeft: isAr ? '0.35rem' : 0, marginRight: isAr ? 0 : '0.35rem' }} />
+                  {isAr ? 'إضافة مقطع جديد' : 'Add Section'}
+                </button>
+              )}
+            </div>
+          ) : (
+            filteredItems.map((item, index) => {
+              const statusColor = item.status === 'منجز' ? 'badge-success' : item.status === 'قيد التنفيذ' ? 'badge-warning' : 'badge-danger';
+              const isDone = (item.overall_progress || 0) >= 100;
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass-panel marblex-touch-card"
+                  style={{
+                    padding: '1.2rem',
+                    borderRadius: 'var(--radius-xl)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '0.85rem',
+                    border: isDone ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border)',
+                    boxShadow: 'var(--shadow-sm)',
+                    position: 'relative'
+                  }}
+                >
+                  {/* Card Top */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--muted)', background: 'var(--surface-warm)', padding: '2px 7px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border)' }}>
+                          #{index + 1}
+                        </span>
+                        <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', fontWeight: '800', fontSize: '0.75rem' }}>
+                          {item.zone}
+                        </span>
+                        <span className={`badge ${statusColor}`} style={{ fontSize: '0.72rem' }}>
+                          {item.status}
+                        </span>
+                      </div>
+
+                      <div style={{
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: 'var(--radius-pill)',
+                        background: isDone ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.12)',
+                        color: isDone ? 'var(--success)' : 'var(--accent)',
+                        fontWeight: '900',
+                        fontSize: '1rem',
+                        direction: 'ltr'
+                      }}>
+                        {item.overall_progress || 0}%
+                      </div>
+                    </div>
+
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: '800', color: 'var(--fg)', margin: '0.45rem 0 0 0', lineHeight: 1.3 }}>
+                      {item.item_name}
+                    </h3>
+                  </div>
+
+                  {/* Dual Metrics (Pieces + Steel) */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', background: 'var(--surface-warm)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)' }}>
+                    {/* Pieces */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>
+                        <span>{isAr ? 'القطع' : 'Pieces'}</span>
+                        <span style={{ fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>{item.pieces_progress || 0}%</span>
+                      </div>
+                      <div style={{ fontWeight: '800', fontSize: '0.95rem', color: 'var(--fg)' }}>
+                        <span style={{ color: 'var(--accent)' }}>{item.applied_pieces}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 'normal' }}> / {item.total_pieces}</span>
+                      </div>
+                      <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
+                        <div style={{ width: `${Math.min(100, item.pieces_progress || 0)}%`, height: '100%', background: 'var(--accent)' }} />
+                      </div>
+                    </div>
+
+                    {/* Steel */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>
+                        <span>{isAr ? 'الستيل' : 'Steel'}</span>
+                        <span style={{ fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>{item.steel_progress || 0}%</span>
+                      </div>
+                      <div style={{ fontWeight: '800', fontSize: '0.95rem', color: 'var(--fg)' }}>
+                        <span style={{ color: 'var(--warning)' }}>{item.applied_steel}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 'normal' }}> / {item.total_steel}</span>
+                      </div>
+                      <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
+                        <div style={{ width: `${Math.min(100, item.steel_progress || 0)}%`, height: '100%', background: 'var(--warning)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes text */}
+                  {item.notes && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--muted)', background: 'rgba(0,0,0,0.02)', padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>•</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.notes}</span>
+                    </div>
+                  )}
+
+                  {/* Mobile Actions with 44px touch targets */}
+                  {isAdmin && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(item)}
+                        className="btn btn-secondary"
+                        style={{ flex: 1, padding: '0.55rem', minHeight: '40px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', color: 'var(--accent)', fontWeight: '700' }}
+                      >
+                        <Edit3 size={15} />
+                        <span>{isAr ? 'تعديل' : 'Edit'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleClone(item)}
+                        className="btn btn-secondary"
+                        style={{ flex: 1, padding: '0.55rem', minHeight: '40px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', color: '#10b981', fontWeight: '700' }}
+                      >
+                        <Copy size={15} />
+                        <span>{isAr ? 'نسخ' : 'Clone'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setItemToDelete(item)}
+                        className="btn btn-secondary"
+                        disabled={deletingId === item.id}
+                        style={{ padding: '0.55rem 0.85rem', minHeight: '40px', color: 'var(--danger)' }}
+                        title={isAr ? 'حذف' : 'Delete'}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        /* ── Main Data Table ──────────────────────────────────────── */
+        <div className="table-responsive glass-panel" style={{ borderRadius: 'var(--radius-xl)', overflowX: 'auto' }}>
+          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: isAr ? 'right' : 'left' }}>
+            <thead>
+              <tr style={{ background: 'var(--surface-warm)', borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>#</th>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'المقطع / الجدار' : 'Section Name'}</th>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'الزون' : 'Zone'}</th>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'القطع المطبقة' : 'Pieces'}</th>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'إنجاز القطع' : 'Pieces %'}</th>
+                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الستيل المطبق' : 'Steel'}</th>
               <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'إنجاز الستيل' : 'Steel %'}</th>
               <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'النسبة الكلية' : 'Overall'}</th>
               <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الحالة' : 'Status'}</th>
@@ -883,6 +1098,7 @@ export default function MarblexProgress({ user, lang, t }) {
           )}
         </table>
       </div>
+      )}
 
       {/* ── Bottom Executive Summary Ribbon ───────────────────────── */}
       {!loading && filteredItems.length > 0 && (
