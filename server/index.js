@@ -761,7 +761,22 @@ app.post('/api/workers-wages', async (req, res) => {
     saveJsonFallback('workers_wages.json', jsonList);
 
     if (isSupabaseActive()) {
-      try { await supabase.from('workers_wages').insert([newWage]); } catch {}
+      try { 
+        const numId = parseInt(newWage.id, 10) || Date.now();
+        await supabase.from('workers_wages').insert([{
+          id: numId,
+          work_date: newWage.work_date,
+          work_item: newWage.work_item,
+          worker_name: newWage.worker_name,
+          shifts_count: newWage.shifts_count,
+          shift_price: newWage.shift_price,
+          total_amount: newWage.total_amount,
+          notes: newWage.notes || null,
+          created_at: newWage.created_at
+        }]); 
+      } catch (e) {
+        console.warn('Supabase wage insert warning:', e.message);
+      }
     }
 
     res.status(201).json(newWage);
@@ -793,6 +808,23 @@ app.put('/api/workers-wages/:id', async (req, res) => {
       saveJsonFallback('workers_wages.json', jsonList);
     }
 
+    if (isSupabaseActive()) {
+      try {
+        const numId = parseInt(id, 10);
+        await supabase.from('workers_wages').update({
+          work_date: record.work_date,
+          work_item: record.work_item,
+          worker_name: record.worker_name,
+          shifts_count: shiftsCount,
+          shift_price: shiftPrice,
+          total_amount: totalAmount,
+          notes: record.notes || null
+        }).eq('id', numId || id);
+      } catch (e) {
+        console.warn('Supabase wage update warning:', e.message);
+      }
+    }
+
     res.json({ ...record, id, total_amount: totalAmount });
   } catch (err) {
     console.error('Update wage error:', err);
@@ -810,7 +842,12 @@ app.delete('/api/workers-wages/:id', async (req, res) => {
     saveJsonFallback('workers_wages.json', filtered);
 
     if (isSupabaseActive()) {
-      try { await supabase.from('workers_wages').delete().eq('id', id); } catch {}
+      try { 
+        const numId = parseInt(id, 10);
+        await supabase.from('workers_wages').delete().eq('id', numId || id); 
+      } catch (e) {
+        console.warn('Supabase wage delete warning:', e.message);
+      }
     }
 
     res.json({ success: true });
