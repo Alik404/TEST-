@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Layers, Plus, Printer, Search, Edit3, Trash2, CheckCircle2, 
-  Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert
+  Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy
 } from 'lucide-react';
 
 export default function MarblexProgress({ user, lang, t }) {
@@ -21,6 +21,7 @@ export default function MarblexProgress({ user, lang, t }) {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [isCloneMode, setIsCloneMode] = useState(false);
   const [formData, setFormData] = useState({
     zone: 'Zone A',
     item_name: '',
@@ -125,6 +126,7 @@ export default function MarblexProgress({ user, lang, t }) {
   // Open modal for Create
   const handleOpenCreate = () => {
     setEditingItem(null);
+    setIsCloneMode(false);
     setFormData({
       zone: selectedZone !== 'ALL' ? selectedZone : 'Zone A',
       item_name: '',
@@ -141,6 +143,7 @@ export default function MarblexProgress({ user, lang, t }) {
   // Open modal for Edit
   const handleOpenEdit = (item) => {
     setEditingItem(item);
+    setIsCloneMode(false);
     setFormData({
       zone: item.zone,
       item_name: item.item_name,
@@ -149,6 +152,23 @@ export default function MarblexProgress({ user, lang, t }) {
       total_steel: item.total_steel,
       applied_steel: item.applied_steel,
       notes: item.notes || '',
+      status: item.status || 'auto'
+    });
+    setIsModalOpen(true);
+  };
+
+  // Open modal for Clone / Duplicate
+  const handleClone = (item) => {
+    setEditingItem(null); // Triggers new creation on submit
+    setIsCloneMode(true);
+    setFormData({
+      zone: item.zone,
+      item_name: `${item.item_name} (نسخة)`,
+      total_pieces: item.total_pieces,
+      applied_pieces: item.applied_pieces || 0,
+      total_steel: item.total_steel,
+      applied_steel: item.applied_steel || 0,
+      notes: item.notes ? `${item.notes} [مستنسخ]` : '',
       status: item.status || 'auto'
     });
     setIsModalOpen(true);
@@ -649,7 +669,12 @@ export default function MarblexProgress({ user, lang, t }) {
               filteredItems.map((item, index) => {
                 const statusColor = item.status === 'منجز' ? 'badge-success' : item.status === 'قيد التنفيذ' ? 'badge-warning' : 'badge-danger';
                 return (
-                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease' }}>
+                  <tr 
+                    key={item.id} 
+                    onDoubleClick={() => isAdmin && handleOpenEdit(item)}
+                    title={isAdmin ? (isAr ? 'انقر مرتين للتعديل السريع' : 'Double click to edit') : ''}
+                    style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease', cursor: isAdmin ? 'pointer' : 'default' }}
+                  >
                     <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', fontWeight: '600' }}>
                       {index + 1}
                     </td>
@@ -704,23 +729,31 @@ export default function MarblexProgress({ user, lang, t }) {
                     </td>
                     {isAdmin && (
                       <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
                           <button
                             onClick={() => handleOpenEdit(item)}
                             className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', color: 'var(--accent)' }}
-                            title={isAr ? 'تعديل' : 'Edit'}
+                            style={{ padding: '0.35rem 0.55rem', color: 'var(--accent)' }}
+                            title={isAr ? 'تعديل المقطع' : 'Edit'}
                           >
                             <Edit3 size={15} />
+                          </button>
+                          <button
+                            onClick={() => handleClone(item)}
+                            className="btn btn-secondary"
+                            style={{ padding: '0.35rem 0.55rem', color: '#10b981' }}
+                            title={isAr ? 'نسخ واستنساخ المقطع' : 'Copy / Clone'}
+                          >
+                            <Copy size={15} />
                           </button>
                           <button
                             onClick={() => setItemToDelete(item)}
                             className="btn btn-secondary"
                             disabled={deletingId === item.id}
-                            style={{ padding: '0.35rem 0.6rem', color: 'var(--danger)' }}
-                            title={isAr ? 'حذف' : 'Delete'}
+                            style={{ padding: '0.35rem 0.55rem', color: 'var(--danger)' }}
+                            title={isAr ? 'حذف المقطع' : 'Delete'}
                           >
-                            <Trash2 size={15} />
+                          <Trash2 size={15} />
                           </button>
                         </div>
                       </td>
@@ -778,9 +811,11 @@ export default function MarblexProgress({ user, lang, t }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                 <h3 style={{ fontSize: '1.2rem', fontWeight: '800', color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <Layers style={{ color: 'var(--accent)' }} size={22} />
-                  {editingItem 
-                    ? (isAr ? 'تعديل مقطع ماربلكس' : 'Edit Marblex Section')
-                    : (isAr ? 'إضافة مقطع ماربلكس جديد' : 'New Marblex Section')
+                  {isCloneMode 
+                    ? (isAr ? 'نسخ واستنساخ مقطع ماربلكس' : 'Duplicate Marblex Section')
+                    : editingItem 
+                      ? (isAr ? 'تعديل مقطع ماربلكس' : 'Edit Marblex Section')
+                      : (isAr ? 'إضافة مقطع ماربلكس جديد' : 'New Marblex Section')
                   }
                 </h3>
                 <button 
@@ -820,7 +855,7 @@ export default function MarblexProgress({ user, lang, t }) {
                     <input
                       type="text"
                       className="input-field"
-                      placeholder={isAr ? 'مثال: جدار الواجهة A-1' : 'e.g. Front Wall A-1'}
+                      placeholder={isAr ? 'مثال: جدار الواجهة الرئيسي A-1' : 'e.g. Main Wall Section A-1'}
                       value={formData.item_name}
                       onChange={(e) => setFormData({ ...formData, item_name: e.target.value })}
                       required
@@ -837,7 +872,7 @@ export default function MarblexProgress({ user, lang, t }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                        {isAr ? 'مجموع القطع المراد تطبيقها' : 'Total Pieces'}
+                        {isAr ? 'مجموع القطع المراد تطبيقها' : 'Total Target Pieces'}
                       </label>
                       <input
                         type="number"
@@ -940,20 +975,70 @@ export default function MarblexProgress({ user, lang, t }) {
                   />
                 </div>
 
+                {/* Live Real-Time Calculation Preview */}
+                {(() => {
+                  const liveTotP = Math.max(0, parseInt(formData.total_pieces, 10) || 0);
+                  const liveAppP = Math.min(liveTotP, Math.max(0, parseInt(formData.applied_pieces, 10) || 0));
+                  const livePiecesProg = liveTotP > 0 ? parseFloat(((liveAppP / liveTotP) * 100).toFixed(1)) : 0;
+
+                  const liveTotS = Math.max(0, parseInt(formData.total_steel, 10) || 0);
+                  const liveAppS = Math.min(liveTotS, Math.max(0, parseInt(formData.applied_steel, 10) || 0));
+                  const liveSteelProg = liveTotS > 0 ? parseFloat(((liveAppS / liveTotS) * 100).toFixed(1)) : 0;
+
+                  const liveOverallProg = parseFloat(((livePiecesProg + liveSteelProg) / 2).toFixed(1));
+
+                  return (
+                    <div style={{ background: 'var(--surface-warm)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'block', fontWeight: '600' }}>
+                          {isAr ? 'النسبة الكلية المحسوبة فورياً:' : 'Auto Calculated Progress:'}
+                        </span>
+                        <span style={{ fontSize: '1.35rem', fontWeight: '900', color: liveOverallProg >= 100 ? 'var(--success)' : 'var(--accent)' }}>
+                          {liveOverallProg}%
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.85rem', fontSize: '0.82rem', fontWeight: '700' }}>
+                        <span style={{ color: 'var(--accent)' }}>
+                          {isAr ? 'إنجاز القطع:' : 'Pieces:'} {livePiecesProg}%
+                        </span>
+                        <span style={{ color: 'var(--warning)' }}>
+                          {isAr ? 'إنجاز الستيل:' : 'Steel:'} {liveSteelProg}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Actions */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                  {editingItem ? (
-                    <button
-                      type="button"
-                      onClick={() => setItemToDelete(editingItem)}
-                      disabled={saving}
-                      className="btn btn-danger"
-                      style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
-                    >
-                      <Trash2 size={16} />
-                      <span>{isAr ? 'حذف هذا المقطع' : 'Delete Section'}</span>
-                    </button>
-                  ) : <div />}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {editingItem && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setItemToDelete(editingItem)}
+                          disabled={saving}
+                          className="btn btn-danger"
+                          style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
+                          title={isAr ? 'حذف هذا المقطع نهائياً' : 'Delete Section'}
+                        >
+                          <Trash2 size={16} />
+                          <span>{isAr ? 'حذف' : 'Delete'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleClone(editingItem)}
+                          disabled={saving}
+                          className="btn btn-secondary"
+                          style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
+                          title={isAr ? 'استنساخ كعنصر جديد' : 'Duplicate as new'}
+                        >
+                          <Copy size={16} />
+                          <span>{isAr ? 'نسخ واستنساخ' : 'Clone'}</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                     <button
@@ -971,7 +1056,7 @@ export default function MarblexProgress({ user, lang, t }) {
                       style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700' }}
                     >
                       <Save size={16} />
-                      <span>{saving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isAr ? 'حفظ السجل' : 'Save Record')}</span>
+                      <span>{saving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isCloneMode ? (isAr ? 'حفظ النسخة' : 'Save Copy') : editingItem ? (isAr ? 'حفظ التعديلات' : 'Save Changes') : (isAr ? 'إضافة المقطع' : 'Add Section'))}</span>
                     </button>
                   </div>
                 </div>
