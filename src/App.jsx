@@ -22,6 +22,7 @@ const WorkersWages = lazy(() => import('./components/WorkersWages'));
 const WeeklyAdvance = lazy(() => import('./components/WeeklyAdvance'));
 const UsersManagement = lazy(() => import('./components/UsersManagement'));
 const ExecutiveSummary = lazy(() => import('./components/ExecutiveSummary'));
+const MarblexProgress = lazy(() => import('./components/MarblexProgress'));
 
 // Sleek Component Loading Fallback
 function TabSkeletonLoader({ t }) {
@@ -529,6 +530,22 @@ export default function App() {
                     t={t}
                     lang={lang}
                     translateText={translateText}
+                  />
+                </motion.div>
+              )}
+
+              {activeTab === 'marblex' && (
+                <motion.div
+                  key="marblex"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <MarblexProgress 
+                    user={user}
+                    lang={lang}
+                    t={t}
                   />
                 </motion.div>
               )}

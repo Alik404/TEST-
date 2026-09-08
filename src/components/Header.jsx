@@ -25,6 +25,8 @@ export default function Header({
         return t('headerTrackingTitle');
       case 'marble':
         return t('headerMarbleTitle');
+      case 'marblex':
+        return t('headerMarblexTitle');
       case 'materials-consumption':
         return t('headerMaterialsConsumptionTitle');
       case 'workers-wages':
@@ -50,6 +52,8 @@ export default function Header({
         return t('headerTrackingSubtitle');
       case 'marble':
         return t('headerMarbleSubtitle');
+      case 'marblex':
+        return t('headerMarblexSubtitle');
       case 'materials-consumption':
         return t('headerMaterialsConsumptionSubtitle');
       case 'workers-wages':

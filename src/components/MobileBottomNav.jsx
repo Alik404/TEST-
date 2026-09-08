@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  LayoutDashboard, ClipboardList, Layers,
+  LayoutDashboard, ClipboardList, Layers, Boxes,
   MessageSquare, FileText, Banknote, BarChart3, Receipt, Users, MoreHorizontal, X
 } from 'lucide-react';
 import { useState } from 'react';
@@ -17,6 +17,7 @@ export default function MobileBottomNav({ activeTab, setActiveTab, lang, user })
   ];
 
   const moreItems = [
+    { id: 'marblex',               label: isAr ? 'أعمال الماربلكس' : 'Marblex',          icon: Boxes     },
     { id: 'executive-summary',     label: isAr ? 'التقرير التنفيذي' : 'Executive',       icon: BarChart3 },
     { id: 'materials-consumption', label: isAr ? 'استهلاك المواد'   : 'Materials',        icon: FileText  },
     { id: 'workers-wages',         label: isAr ? 'أجور العمال'     : 'Wages',            icon: Banknote  },

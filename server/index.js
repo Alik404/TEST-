@@ -940,6 +940,240 @@ app.delete('/api/weekly-advance/:id', async (req, res) => {
   }
 });
 
+// ── 9.5 Marblex Work Progress API Endpoints ────────────────────────────────
+app.get('/api/marblex', async (req, res) => {
+  const { zone, status } = req.query;
+  try {
+    let query = 'SELECT * FROM marblex_progress';
+    const params = [];
+    const conditions = [];
+
+    if (zone) {
+      conditions.push('zone = ?');
+      params.push(zone);
+    }
+    if (status) {
+      conditions.push('status = ?');
+      params.push(status);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    query += ' ORDER BY created_at ASC';
+
+    const rows = await dbAll(query, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Fetch marblex progress error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب تقدم أعمال الماربلكس.' });
+  }
+});
+
+app.post('/api/marblex', async (req, res) => {
+  const { 
+    zone, item_name, total_pieces, applied_pieces, 
+    total_steel, applied_steel, notes, userName 
+  } = req.body;
+
+  if (!zone || !item_name) {
+    return res.status(400).json({ error: 'الزون واسم المقطع مطلوبان.' });
+  }
+
+  const id = 'mbx-' + Date.now().toString();
+  const totP = Math.max(0, parseInt(total_pieces, 10) || 0);
+  const appP = Math.min(totP, Math.max(0, parseInt(applied_pieces, 10) || 0));
+  const totS = Math.max(0, parseInt(total_steel, 10) || 0);
+  const appS = Math.min(totS, Math.max(0, parseInt(applied_steel, 10) || 0));
+
+  const pProg = totP > 0 ? parseFloat(((appP / totP) * 100).toFixed(2)) : 0;
+  const sProg = totS > 0 ? parseFloat(((appS / totS) * 100).toFixed(2)) : 0;
+  const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
+
+  let status = 'قيد التنفيذ';
+  if (oProg >= 100) status = 'منجز';
+  else if (oProg === 0) status = 'غير مطبق';
+
+  const updatedBy = userName || 'المهندس المقيم';
+  const createdAt = new Date().toISOString();
+
+  const newRecord = {
+    id,
+    zone,
+    item_name,
+    total_pieces: totP,
+    applied_pieces: appP,
+    pieces_progress: pProg,
+    total_steel: totS,
+    applied_steel: appS,
+    steel_progress: sProg,
+    overall_progress: oProg,
+    status,
+    notes: notes || '',
+    updated_by: updatedBy,
+    created_at: createdAt
+  };
+
+  try {
+    await sqliteRun(`
+      INSERT INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, zone, item_name, totP, appP, pProg, totS, appS, sProg, oProg, status, notes || '', updatedBy, createdAt]);
+
+    const jsonList = getJsonFallback('marblex_progress.json', []);
+    jsonList.push(newRecord);
+    saveJsonFallback('marblex_progress.json', jsonList);
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('marblex_progress').insert([newRecord]);
+      } catch (e) {
+        console.warn('Supabase marblex insert warning:', e.message);
+      }
+    }
+
+    if (userName) {
+      const actionText = `قام (${userName}) بإضافة مقطع ماربلكس جديد "${item_name}" في (${zone}) - نسبة الإنجاز: ${oProg}%`;
+      await dbRun(
+        `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
+         VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
+        ['النظام', 'system', actionText]
+      );
+    }
+
+    res.status(201).json(newRecord);
+  } catch (err) {
+    console.error('Create marblex record error:', err);
+    res.status(500).json({ error: 'فشل حفظ سجل الماربلكس.' });
+  }
+});
+
+app.put('/api/marblex/:id', async (req, res) => {
+  const { id } = req.params;
+  const { 
+    zone, item_name, total_pieces, applied_pieces, 
+    total_steel, applied_steel, status: manualStatus, notes, userName 
+  } = req.body;
+
+  try {
+    const existing = await dbGet('SELECT * FROM marblex_progress WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'السجل غير موجود.' });
+    }
+
+    const curZone = zone || existing.zone;
+    const curName = item_name || existing.item_name;
+    const totP = total_pieces !== undefined ? Math.max(0, parseInt(total_pieces, 10) || 0) : existing.total_pieces;
+    const appP = applied_pieces !== undefined ? Math.max(0, parseInt(applied_pieces, 10) || 0) : existing.applied_pieces;
+    const totS = total_steel !== undefined ? Math.max(0, parseInt(total_steel, 10) || 0) : existing.total_steel;
+    const appS = applied_steel !== undefined ? Math.max(0, parseInt(applied_steel, 10) || 0) : existing.applied_steel;
+
+    const pProg = totP > 0 ? parseFloat(((appP / totP) * 100).toFixed(2)) : 0;
+    const sProg = totS > 0 ? parseFloat(((appS / totS) * 100).toFixed(2)) : 0;
+    const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
+
+    let status = manualStatus;
+    if (!status) {
+      if (oProg >= 100) status = 'منجز';
+      else if (oProg === 0) status = 'غير مطبق';
+      else status = 'قيد التنفيذ';
+    }
+
+    const updatedBy = userName || existing.updated_by || 'المهندس المقيم';
+    const updatedAt = new Date().toISOString();
+
+    await sqliteRun(`
+      UPDATE marblex_progress SET
+        zone = ?, item_name = ?, total_pieces = ?, applied_pieces = ?, pieces_progress = ?,
+        total_steel = ?, applied_steel = ?, steel_progress = ?, overall_progress = ?,
+        status = ?, notes = ?, updated_by = ?, updated_at = ?
+      WHERE id = ?
+    `, [curZone, curName, totP, appP, pProg, totS, appS, sProg, oProg, status, notes !== undefined ? notes : existing.notes, updatedBy, updatedAt, id]);
+
+    const updatedRecord = {
+      ...existing,
+      zone: curZone,
+      item_name: curName,
+      total_pieces: totP,
+      applied_pieces: appP,
+      pieces_progress: pProg,
+      total_steel: totS,
+      applied_steel: appS,
+      steel_progress: sProg,
+      overall_progress: oProg,
+      status,
+      notes: notes !== undefined ? notes : existing.notes,
+      updated_by: updatedBy,
+      updated_at: updatedAt
+    };
+
+    const jsonList = getJsonFallback('marblex_progress.json', []);
+    const idx = jsonList.findIndex(item => String(item.id) === String(id));
+    if (idx !== -1) {
+      jsonList[idx] = updatedRecord;
+      saveJsonFallback('marblex_progress.json', jsonList);
+    }
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('marblex_progress').update({
+          zone: curZone,
+          item_name: curName,
+          total_pieces: totP,
+          applied_pieces: appP,
+          pieces_progress: pProg,
+          total_steel: totS,
+          applied_steel: appS,
+          steel_progress: sProg,
+          overall_progress: oProg,
+          status,
+          notes: notes !== undefined ? notes : existing.notes,
+          updated_by: updatedBy,
+          updated_at: updatedAt
+        }).eq('id', id);
+      } catch (e) {
+        console.warn('Supabase marblex update warning:', e.message);
+      }
+    }
+
+    if (userName) {
+      const actionText = `قام (${userName}) بتحديث مقطع ماربلكس "${curName}" (${curZone}) - نسبة الإنجاز: ${oProg}% | الحالة: ${status}`;
+      await dbRun(
+        `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
+         VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
+        ['النظام', 'system', actionText]
+      );
+    }
+
+    res.json(updatedRecord);
+  } catch (err) {
+    console.error('Update marblex error:', err);
+    res.status(500).json({ error: 'فشل تحديث سجل الماربلكس.' });
+  }
+});
+
+app.delete('/api/marblex/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sqliteRun('DELETE FROM marblex_progress WHERE id = ?', [id]);
+
+    const jsonList = getJsonFallback('marblex_progress.json', []);
+    const filtered = jsonList.filter(item => String(item.id) !== String(id));
+    saveJsonFallback('marblex_progress.json', filtered);
+
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('marblex_progress').delete().eq('id', id);
+      } catch {}
+    }
+
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('Delete marblex error:', err);
+    res.status(500).json({ error: 'فشل حذف سجل الماربلكس.' });
+  }
+});
+
 // ── 10. Users Management API Endpoints ──────────────────────────────────────
 app.get('/api/users', async (req, res) => {
   try {

@@ -509,6 +509,57 @@ export const initDatabase = async () => {
       console.log(`Migrated ${jsonAdvances.length} weekly advance records to SQLite.`);
     }
 
+    // 10. Marblex Progress Table
+    await sqliteRun(`
+      CREATE TABLE IF NOT EXISTS marblex_progress (
+        id TEXT PRIMARY KEY,
+        zone TEXT NOT NULL,
+        item_name TEXT NOT NULL,
+        total_pieces INTEGER DEFAULT 0,
+        applied_pieces INTEGER DEFAULT 0,
+        pieces_progress REAL DEFAULT 0,
+        total_steel INTEGER DEFAULT 0,
+        applied_steel INTEGER DEFAULT 0,
+        steel_progress REAL DEFAULT 0,
+        overall_progress REAL DEFAULT 0,
+        status TEXT DEFAULT 'قيد التنفيذ',
+        notes TEXT,
+        updated_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      )
+    `);
+
+    const marblexCount = await sqliteGet('SELECT COUNT(*) as count FROM marblex_progress');
+    if (!marblexCount || marblexCount.count === 0) {
+      const defaultMarblex = [
+        { id: 'mbx-1', zone: 'Zone A', item_name: 'جدار الواجهة الرئيسي A-1', total_pieces: 120, applied_pieces: 120, total_steel: 60, applied_steel: 60, notes: 'مكتمل ومفحوص موقعياً بالكامل' },
+        { id: 'mbx-2', zone: 'Zone A', item_name: 'قاطع المدخل A-2', total_pieces: 95, applied_pieces: 80, total_steel: 45, applied_steel: 35, notes: 'استمرار تركيب وتثبيت الستيلات' },
+        { id: 'mbx-3', zone: 'Zone B1', item_name: 'جدار الممشى الداخلي B1-1', total_pieces: 150, applied_pieces: 110, total_steel: 75, applied_steel: 50, notes: 'توريد دفعة الستيل الإضافية' },
+        { id: 'mbx-4', zone: 'Zone B1', item_name: 'قاطع بهو الاستقبال B1-2', total_pieces: 80, applied_pieces: 40, total_steel: 40, applied_steel: 20, notes: 'قيد تثبيت الهيكل الحامل' },
+        { id: 'mbx-5', zone: 'Zone B2', item_name: 'جدار الصالة الخلفية B2-1', total_pieces: 140, applied_pieces: 70, total_steel: 70, applied_steel: 35, notes: 'تم استلام الشاقول والمناسيب الهندسية' },
+        { id: 'mbx-6', zone: 'Zone B2', item_name: 'قواطع الممرات الجانبية B2-2', total_pieces: 90, applied_pieces: 0, total_steel: 45, applied_steel: 0, notes: 'بانتظار إكمال أعمال التأسيسات' },
+        { id: 'mbx-7', zone: 'Zone C', item_name: 'جدار القاعة الكبرى C-1', total_pieces: 200, applied_pieces: 160, total_steel: 100, applied_steel: 80, notes: 'نسبة تقدم ممتازة ومطابقة للمواصفة' },
+        { id: 'mbx-8', zone: 'Zone C', item_name: 'قاطع الكاليري C-2', total_pieces: 110, applied_pieces: 0, total_steel: 55, applied_steel: 0, notes: 'متبقي، لم تبدأ الأعمال بعد' }
+      ];
+
+      for (const m of defaultMarblex) {
+        const pProg = m.total_pieces > 0 ? parseFloat(((m.applied_pieces / m.total_pieces) * 100).toFixed(2)) : 0;
+        const sProg = m.total_steel > 0 ? parseFloat(((m.applied_steel / m.total_steel) * 100).toFixed(2)) : 0;
+        const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
+        let status = 'قيد التنفيذ';
+        if (oProg >= 100) status = 'منجز';
+        else if (oProg === 0) status = 'غير مطبق';
+
+        await sqliteRun(`
+          INSERT INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, pProg, m.total_steel, m.applied_steel, sProg, oProg, status, m.notes, 'المهندس المقيم']);
+      }
+      saveJsonFallback('marblex_progress.json', defaultMarblex);
+      console.log(`Seeded ${defaultMarblex.length} marblex progress records.`);
+    }
+
     console.log('Database schema & records verified successfully.');
   } catch (err) {
     console.error('Database initialization error:', err);
@@ -651,6 +702,12 @@ export const dbGet = async (sql, params = []) => {
         const result = await safeSupa(supabase.from('marble_distribution').select('*').eq('id', params[0]).maybeSingle());
         if (result && result.data) return result.data;
       }
+
+      // Marblex item
+      if (sqlClean.includes('FROM marblex_progress WHERE id = ?')) {
+        const result = await safeSupa(supabase.from('marblex_progress').select('*').eq('id', params[0]).maybeSingle());
+        if (result && result.data) return result.data;
+      }
     } catch (supabaseErr) {
       console.warn('Supabase dbGet fallback:', supabaseErr?.message || supabaseErr);
     }
@@ -761,6 +818,20 @@ export const dbAll = async (sql, params = []) => {
         const result = await safeSupa(
           supabase.from('users').select('id, email, name, role, password').order('id', { ascending: true })
         );
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 11. Marblex Progress
+      if (sqlClean.includes('FROM marblex_progress')) {
+        let q = supabase.from('marblex_progress').select('*').order('created_at', { ascending: true });
+        if (sqlClean.includes('zone = ?') && sqlClean.includes('status = ?')) {
+          q = q.eq('zone', params[0]).eq('status', params[1]);
+        } else if (sqlClean.includes('zone = ?')) {
+          q = q.eq('zone', params[0]);
+        } else if (sqlClean.includes('status = ?')) {
+          q = q.eq('status', params[0]);
+        }
+        const result = await safeSupa(q);
         if (result && result.data && result.data.length > 0) return result.data;
       }
     } catch (supabaseErr) {

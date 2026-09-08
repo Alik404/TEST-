@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import {
-  LayoutDashboard, ClipboardList, Layers,
+  LayoutDashboard, ClipboardList, Layers, Boxes,
   LogOut, ChevronLeft, ChevronRight,
   MessageSquare, FileText, Users, Banknote, Receipt, BarChart3
 } from 'lucide-react';
@@ -27,6 +27,7 @@ export default function Sidebar({
     { id: 'executive-summary',    label: isAr ? 'التقرير التنفيذي الشامل' : 'Executive Summary', icon: BarChart3 },
     { id: 'dashboard',             label: t('menuDashboard'),              icon: LayoutDashboard },
     { id: 'tracking',              label: t('menuTracking'),               icon: ClipboardList   },
+    { id: 'marblex',               label: isAr ? 'تقدم أعمال الماربلكس' : 'Marblex Progress', icon: Boxes },
     { id: 'marble',                label: t('menuMarble'),                 icon: Layers          },
     { id: 'materials-consumption', label: t('menuMaterialsConsumption'),   icon: FileText        },
     { id: 'workers-wages',         label: isAr ? 'أجور العمال' : 'Workers Wages', icon: Banknote },
