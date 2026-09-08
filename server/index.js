@@ -412,6 +412,20 @@ app.post('/api/marble/:id/status', async (req, res) => {
 // ── 6. Daily Updates / Chat API Endpoints ───────────────────────────────────
 app.get('/api/daily-updates', async (req, res) => {
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('daily_updates')
+          .select('*')
+          .order('created_at', { ascending: true });
+        if (data && !error && data.length > 0) {
+          return res.json(data);
+        }
+      } catch (e) {
+        console.warn('Supabase daily-updates query fallback:', e.message);
+      }
+    }
+
     const rows = await sqliteAll(`
       SELECT d.*, u.name as user_name, u.role as user_role,
              r.sender_name as reply_sender_name, r.message_text as reply_message_text, r.media_url as reply_media_url, r.media_type as reply_media_type
@@ -503,6 +517,28 @@ app.post('/api/daily-updates', async (req, res) => {
 // ── 7. Materials Consumption API Endpoints ──────────────────────────────────
 app.get('/api/materials-consumption', async (req, res) => {
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('materials_consumption')
+          .select('*')
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (data && !error && data.length > 0) {
+          const parsed = data.map(r => ({
+            ...r,
+            basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : r.basics,
+            marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : r.marble,
+            sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : r.sealants,
+            bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : r.bulk,
+          }));
+          return res.json(parsed);
+        }
+      } catch (e) {
+        console.warn('Supabase materials query fallback:', e.message);
+      }
+    }
+
     const rows = await sqliteAll('SELECT * FROM materials_consumption ORDER BY date DESC, created_at DESC');
     const parsed = rows.map(r => ({
       ...r,
@@ -644,6 +680,21 @@ app.delete('/api/materials-consumption/:id', async (req, res) => {
 // ── 8. Workers Wages API Endpoints ──────────────────────────────────────────
 app.get('/api/workers-wages', async (req, res) => {
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('workers_wages')
+          .select('*')
+          .order('work_date', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (data && !error && data.length > 0) {
+          return res.json(data);
+        }
+      } catch (e) {
+        console.warn('Supabase workers wages query fallback:', e.message);
+      }
+    }
+
     const rows = await sqliteAll('SELECT * FROM workers_wages ORDER BY work_date DESC, created_at DESC');
     res.json(rows);
   } catch (err) {
@@ -869,6 +920,20 @@ app.delete('/api/weekly-advance/:id', async (req, res) => {
 // ── 10. Users Management API Endpoints ──────────────────────────────────────
 app.get('/api/users', async (req, res) => {
   try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('id, email, name, role, password')
+          .order('id', { ascending: true });
+        if (data && !error && data.length > 0) {
+          return res.json(data);
+        }
+      } catch (e) {
+        console.warn('Supabase users query fallback:', e.message);
+      }
+    }
+
     const rows = await sqliteAll('SELECT id, email, name, role, password, created_at FROM users ORDER BY id ASC');
     res.json(rows);
   } catch (err) {

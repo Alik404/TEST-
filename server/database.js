@@ -18,31 +18,56 @@ const supabaseKey = process.env.SUPABASE_KEY;
 
 let supabase = null;
 let useSupabase = false;
-
-const withTimeout = (promise, ms = 1200) => {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Supabase timeout (${ms}ms)`)), ms))
-  ]);
-};
+let supabaseReady = false;
 
 if (supabaseUrl && supabaseKey && !supabaseUrl.includes('placeholder')) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
     useSupabase = true;
-    console.log('Initialized Supabase client (testing connectivity...).');
+    supabaseReady = true;
+    console.log('Initialized Supabase client (Primary Cloud Database active).');
 
-    withTimeout(supabase.from('categories').select('id').limit(1), 1200)
-      .then(() => console.log('Supabase connection active and verified.'))
+    // Async verification test in background without disabling on initial latency
+    Promise.race([
+      supabase.from('categories').select('id').limit(1),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Initial ping timeout (8s)')), 8000))
+    ])
+      .then((result) => {
+        if (result && result.error) throw result.error;
+        console.log('Supabase cloud connection verified successfully.');
+      })
       .catch((err) => {
-        console.warn('Supabase connectivity check failed, falling back to local SQLite database:', err.message);
-        useSupabase = false;
+        console.warn('Supabase cloud initial ping warning (will retry on incoming requests):', err.message || err);
       });
   } catch (err) {
     console.warn('Failed to initialize Supabase client:', err.message);
     useSupabase = false;
+    supabaseReady = false;
   }
 }
+
+export const withTimeout = (promise, ms = 8000) => {
+  return Promise.race([
+    Promise.resolve(promise).catch(err => ({ data: null, error: err })),
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Supabase timeout (${ms}ms)`)), ms))
+  ]);
+};
+
+// Safe Supabase call wrapper — guarantees no unhandled errors and does not disable cloud permanently
+export const safeSupa = async (supabaseCall, fallbackValue = null) => {
+  if (!useSupabase || !supabase) return fallbackValue;
+  try {
+    const result = await withTimeout(supabaseCall, 8000);
+    if (result && result.error) {
+      console.warn('Supabase query error:', result.error.message || result.error);
+      return fallbackValue;
+    }
+    return result;
+  } catch (err) {
+    console.warn('Supabase call warning:', err.message || err);
+    return fallbackValue;
+  }
+};
 
 // ── SQLite Promise Helpers ──────────────────────────────────────────────────
 export const sqliteGet = (sql, params = []) => {
@@ -481,37 +506,44 @@ export const initDatabase = async () => {
 // Initialize immediately on module load
 initDatabase();
 
-export const isSupabaseActive = () => useSupabase && supabase !== null;
+export const isSupabaseActive = () => Boolean(useSupabase && supabase);
 
 // ── Unified Database Abstraction ────────────────────────────────────────────
 
 export const dbRun = async (sql, params = []) => {
-  if (useSupabase && supabase) {
+  if (isSupabaseActive()) {
     try {
       const sqlClean = sql.replace(/\s+/g, ' ').trim();
 
       if (sqlClean.includes('UPDATE sub_units SET status = ?, notes = ? WHERE id = ?')) {
         const [status, notes, id] = params;
-        const { error } = await withTimeout(supabase.from('sub_units').update({ status, notes }).eq('id', id));
-        if (error) throw error;
-        await sqliteRun(sql, params);
-        return { changes: 1 };
+        const result = await safeSupa(supabase.from('sub_units').update({ status, notes }).eq('id', id));
+        if (result && !result.error) {
+          sqliteRun(sql, params).catch(() => {});
+          return { changes: 1 };
+        }
       }
 
       if (sqlClean.includes('UPDATE sub_units SET white_marked = ?')) {
         const [white_marked, white_extra, white_applied, white_date, brown_marked, brown_extra, brown_applied, brown_date, status, notes, id] = params;
-        const { error } = await withTimeout(supabase.from('sub_units').update({ white_marked, white_extra, white_applied, white_date, brown_marked, brown_extra, brown_applied, brown_date, status, notes }).eq('id', id));
-        if (error) throw error;
-        await sqliteRun(sql, params);
-        return { changes: 1 };
+        const result = await safeSupa(supabase.from('sub_units').update({
+          white_marked, white_extra, white_applied, white_date,
+          brown_marked, brown_extra, brown_applied, brown_date,
+          status, notes
+        }).eq('id', id));
+        if (result && !result.error) {
+          sqliteRun(sql, params).catch(() => {});
+          return { changes: 1 };
+        }
       }
 
       if (sqlClean.includes('UPDATE tasks SET completed_quantity = ?, progress_percent = ? WHERE id = ?')) {
         const [completed, progress, taskId] = params;
-        const { error } = await withTimeout(supabase.from('tasks').update({ completed_quantity: completed, progress_percent: progress }).eq('id', taskId));
-        if (error) throw error;
-        await sqliteRun(sql, params);
-        return { changes: 1 };
+        const result = await safeSupa(supabase.from('tasks').update({ completed_quantity: completed, progress_percent: progress }).eq('id', taskId));
+        if (result && !result.error) {
+          sqliteRun(sql, params).catch(() => {});
+          return { changes: 1 };
+        }
       }
 
       if (sqlClean.includes('INSERT INTO daily_updates')) {
@@ -521,22 +553,25 @@ export const dbRun = async (sql, params = []) => {
         } else {
           [user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id] = params;
         }
-        const { data, error } = await withTimeout(supabase.from('daily_updates').insert([{ user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id }]).select().single());
-        if (error) throw error;
-        const res = await sqliteRun(sql, params);
-        return { id: data.id || res.id, changes: 1 };
+        const result = await safeSupa(supabase.from('daily_updates').insert([{
+          user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id
+        }]).select().single());
+        if (result && result.data && !result.error) {
+          sqliteRun(sql, params).catch(() => {});
+          return { id: result.data.id, changes: 1 };
+        }
       }
 
       if (sqlClean.includes('UPDATE marble_distribution SET status = ?, white_qty = ?, brown_qty = ? WHERE id = ?')) {
         const [status, white_qty, brown_qty, id] = params;
-        const { error } = await withTimeout(supabase.from('marble_distribution').update({ status, white_qty, brown_qty }).eq('id', id));
-        if (error) throw error;
-        await sqliteRun(sql, params);
-        return { changes: 1 };
+        const result = await safeSupa(supabase.from('marble_distribution').update({ status, white_qty, brown_qty }).eq('id', id));
+        if (result && !result.error) {
+          sqliteRun(sql, params).catch(() => {});
+          return { changes: 1 };
+        }
       }
     } catch (supabaseErr) {
-      console.warn('Supabase dbRun warning, executing on SQLite:', supabaseErr.message);
-      useSupabase = false;
+      console.warn('Supabase dbRun fallback:', supabaseErr?.message || supabaseErr);
     }
   }
 
@@ -544,25 +579,52 @@ export const dbRun = async (sql, params = []) => {
 };
 
 export const dbGet = async (sql, params = []) => {
-  if (useSupabase && supabase) {
+  if (isSupabaseActive()) {
     try {
       const sqlClean = sql.replace(/\s+/g, ' ').trim();
 
-      if (sqlClean.includes('FROM users WHERE email = ? AND password = ?')) {
-        const [email, password] = params;
-        const { data, error } = await withTimeout(supabase.from('users').select('id, email, name, role').eq('email', email).eq('password', password).maybeSingle());
-        if (error) throw error;
-        if (data) return data;
+      // Users lookup
+      if (sqlClean.includes('FROM users WHERE')) {
+        if (sqlClean.includes('password = ?')) {
+          const [email, password] = params;
+          const result = await safeSupa(
+            supabase.from('users').select('id, email, name, role').ilike('email', email.trim()).eq('password', password).maybeSingle()
+          );
+          if (result && result.data) return result.data;
+        } else if (sqlClean.includes('LOWER(email) = LOWER(?)') || sqlClean.includes('email = ?')) {
+          const [email] = params;
+          const result = await safeSupa(
+            supabase.from('users').select('id, email, name, role').ilike('email', email.trim()).maybeSingle()
+          );
+          if (result && result.data) return result.data;
+        }
       }
 
-      if (sqlClean.includes('SELECT status, task_id, code, zone FROM sub_units WHERE id = ?')) {
-        const { data, error } = await withTimeout(supabase.from('sub_units').select('*').eq('id', params[0]).maybeSingle());
-        if (error) throw error;
-        if (data) return data;
+      // Single sub-unit
+      if (sqlClean.includes('FROM sub_units WHERE id = ?')) {
+        const result = await safeSupa(supabase.from('sub_units').select('*').eq('id', params[0]).maybeSingle());
+        if (result && result.data) return result.data;
+      }
+
+      // Sub-units counts
+      if (sqlClean.includes('SELECT COUNT(*) as count FROM sub_units WHERE task_id = ?')) {
+        let q = supabase.from('sub_units').select('*', { count: 'exact', head: true }).eq('task_id', params[0]);
+        if (sqlClean.includes('status = ?')) {
+          q = q.eq('status', params[1]);
+        }
+        const result = await safeSupa(q);
+        if (result && result.count !== null && result.count !== undefined) {
+          return { count: result.count };
+        }
+      }
+
+      // Marble distribution
+      if (sqlClean.includes('FROM marble_distribution WHERE id = ?')) {
+        const result = await safeSupa(supabase.from('marble_distribution').select('*').eq('id', params[0]).maybeSingle());
+        if (result && result.data) return result.data;
       }
     } catch (supabaseErr) {
-      console.warn('Supabase dbGet warning, executing on SQLite:', supabaseErr.message);
-      useSupabase = false;
+      console.warn('Supabase dbGet fallback:', supabaseErr?.message || supabaseErr);
     }
   }
 
@@ -570,35 +632,111 @@ export const dbGet = async (sql, params = []) => {
 };
 
 export const dbAll = async (sql, params = []) => {
-  if (useSupabase && supabase) {
+  if (isSupabaseActive()) {
     try {
       const sqlClean = sql.replace(/\s+/g, ' ').trim();
 
+      // 1. Categories
       if (sqlClean.includes('FROM categories')) {
-        const { data, error } = await withTimeout(supabase.from('categories').select('*').order('id', { ascending: true }));
-        if (error) throw error;
-        if (data && data.length) return data;
+        const result = await safeSupa(supabase.from('categories').select('*').order('id', { ascending: true }));
+        if (result && result.data && result.data.length > 0) return result.data;
       }
 
-      if (sqlClean.includes('FROM tasks t') && sqlClean.includes('JOIN categories c')) {
-        const { data, error } = await withTimeout(supabase.from('tasks').select('*, categories(name)').order('id', { ascending: true }));
-        if (error) throw error;
-        if (data && data.length) {
-          return data.map(t => ({
+      // 2. Tasks with Category Name
+      if (sqlClean.includes('FROM tasks') && (sqlClean.includes('JOIN categories') || sqlClean.includes('categories c'))) {
+        const result = await safeSupa(supabase.from('tasks').select('*, categories(name)').order('id', { ascending: true }));
+        if (result && result.data && result.data.length > 0) {
+          return result.data.map(t => ({
             ...t,
-            category_name: t.categories?.name
+            category_name: t.categories?.name || ''
           }));
         }
       }
 
+      // 3. All Tasks
+      if (sqlClean === 'SELECT * FROM tasks' || sqlClean.startsWith('SELECT * FROM tasks ORDER BY')) {
+        const result = await safeSupa(supabase.from('tasks').select('*').order('id', { ascending: true }));
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 4. Sub-units (Nazalat) Aggregation (Dashboard KPIs)
+      if (sqlClean.includes('FROM sub_units') && sqlClean.includes('GROUP BY zone, status')) {
+        const result = await safeSupa(supabase.from('sub_units').select('zone, status'));
+        if (result && result.data && result.data.length > 0) {
+          const map = {};
+          result.data.forEach(item => {
+            const key = `${item.zone}:::${item.status}`;
+            if (!map[key]) map[key] = { zone: item.zone, status: item.status, count: 0 };
+            map[key].count++;
+          });
+          return Object.values(map);
+        }
+      }
+
+      // 5. Sub-units (Nazalat Tracking Table & Counts)
+      if (sqlClean.includes('FROM sub_units')) {
+        if (sqlClean.includes('COUNT(*)')) {
+          let q = supabase.from('sub_units').select('*', { count: 'exact', head: true });
+          if (sqlClean.includes('WHERE task_id = ? AND status = ?')) {
+            q = q.eq('task_id', params[0]).eq('status', params[1]);
+          } else if (sqlClean.includes('WHERE task_id = ?')) {
+            q = q.eq('task_id', params[0]);
+          }
+          const result = await safeSupa(q);
+          if (result && result.count !== null && result.count !== undefined) {
+            return [{ count: result.count }];
+          }
+        }
+
+        let q = supabase.from('sub_units').select('*').order('serial_number', { ascending: true });
+        if (sqlClean.includes('zone = ?') && sqlClean.includes('status = ?')) {
+          q = q.eq('zone', params[0]).eq('status', params[1]);
+        } else if (sqlClean.includes('zone = ?')) {
+          q = q.eq('zone', params[0]);
+        } else if (sqlClean.includes('status = ?')) {
+          q = q.eq('status', params[0]);
+        }
+        const result = await safeSupa(q);
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 6. Marble Distribution
       if (sqlClean.includes('FROM marble_distribution')) {
-        const { data, error } = await withTimeout(supabase.from('marble_distribution').select('*').order('id', { ascending: true }));
-        if (error) throw error;
-        if (data && data.length) return data;
+        const result = await safeSupa(supabase.from('marble_distribution').select('*').order('id', { ascending: true }));
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 7. Daily Updates
+      if (sqlClean.includes('FROM daily_updates')) {
+        const result = await safeSupa(supabase.from('daily_updates').select('*').order('created_at', { ascending: true }));
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 8. Materials Consumption
+      if (sqlClean.includes('FROM materials_consumption')) {
+        const result = await safeSupa(
+          supabase.from('materials_consumption').select('*').order('date', { ascending: false }).order('created_at', { ascending: false })
+        );
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 9. Workers Wages
+      if (sqlClean.includes('FROM workers_wages')) {
+        const result = await safeSupa(
+          supabase.from('workers_wages').select('*').order('work_date', { ascending: false }).order('created_at', { ascending: false })
+        );
+        if (result && result.data && result.data.length > 0) return result.data;
+      }
+
+      // 10. Users List
+      if (sqlClean.includes('FROM users')) {
+        const result = await safeSupa(
+          supabase.from('users').select('id, email, name, role, password').order('id', { ascending: true })
+        );
+        if (result && result.data && result.data.length > 0) return result.data;
       }
     } catch (supabaseErr) {
-      console.warn('Supabase dbAll warning, executing on SQLite:', supabaseErr.message);
-      useSupabase = false;
+      console.warn('Supabase dbAll fallback:', supabaseErr?.message || supabaseErr);
     }
   }
 
