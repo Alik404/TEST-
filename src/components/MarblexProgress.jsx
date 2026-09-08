@@ -33,6 +33,7 @@ export default function MarblexProgress({ user, lang, t }) {
   });
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [itemToDelete, setItemToDelete] = useState(null);
 
   const zonesList = [
     { id: 'ALL', label: isAr ? 'جميع الزونات' : 'All Zones' },
@@ -202,14 +203,19 @@ export default function MarblexProgress({ user, lang, t }) {
     }
   };
 
-  // Delete
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(isAr ? `هل أنت متأكد من حذف مقطع "${name}"؟` : `Are you sure you want to delete "${name}"?`)) return;
+  // Confirm and Execute Delete (In-App Modal)
+  const confirmDelete = async () => {
+    if (!itemToDelete) return;
+    const { id } = itemToDelete;
     setDeletingId(id);
     try {
       const res = await fetch(`/api/marblex/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(isAr ? 'فشل حذف السجل.' : 'Failed to delete record.');
       setItems(prev => prev.filter(i => i.id !== id));
+      setItemToDelete(null);
+      if (isModalOpen && editingItem?.id === id) {
+        setIsModalOpen(false);
+      }
     } catch (err) {
       alert(err.message);
     } finally {
@@ -708,7 +714,7 @@ export default function MarblexProgress({ user, lang, t }) {
                             <Edit3 size={15} />
                           </button>
                           <button
-                            onClick={() => handleDelete(item.id, item.item_name)}
+                            onClick={() => setItemToDelete(item)}
                             className="btn btn-secondary"
                             disabled={deletingId === item.id}
                             style={{ padding: '0.35rem 0.6rem', color: 'var(--danger)' }}
@@ -935,26 +941,118 @@ export default function MarblexProgress({ user, lang, t }) {
                 </div>
 
                 {/* Actions */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    disabled={saving}
-                    className="btn btn-secondary"
-                  >
-                    {isAr ? 'إلغاء' : 'Cancel'}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="btn btn-primary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700' }}
-                  >
-                    <Save size={16} />
-                    <span>{saving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isAr ? 'حفظ السجل' : 'Save Record')}</span>
-                  </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                  {editingItem ? (
+                    <button
+                      type="button"
+                      onClick={() => setItemToDelete(editingItem)}
+                      disabled={saving}
+                      className="btn btn-danger"
+                      style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
+                    >
+                      <Trash2 size={16} />
+                      <span>{isAr ? 'حذف هذا المقطع' : 'Delete Section'}</span>
+                    </button>
+                  ) : <div />}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      disabled={saving}
+                      className="btn btn-secondary"
+                    >
+                      {isAr ? 'إلغاء' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="btn btn-primary"
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700' }}
+                    >
+                      <Save size={16} />
+                      <span>{saving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isAr ? 'حفظ السجل' : 'Save Record')}</span>
+                    </button>
+                  </div>
                 </div>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Custom In-App Delete Confirmation Modal ──────────────── */}
+      <AnimatePresence>
+        {itemToDelete && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 10001,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem'
+            }}
+            onClick={() => !deletingId && setItemToDelete(null)}
+          >
+            <motion.div
+              className="glass-panel"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              style={{
+                background: 'var(--surface-solid)',
+                borderRadius: 'var(--radius-xl)',
+                width: '100%',
+                maxWidth: '440px',
+                padding: '2rem 1.75rem',
+                border: '1px solid var(--border)',
+                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+                textAlign: 'center'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
+                <Trash2 size={28} />
+              </div>
+
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--fg)', marginBottom: '0.5rem' }}>
+                {isAr ? 'تأكيد حذف مقطع الماربلكس' : 'Confirm Section Deletion'}
+              </h3>
+              
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                {isAr 
+                  ? `هل أنت متأكد من رغبتك في حذف المقطع "${itemToDelete.item_name}" التابع لـ (${itemToDelete.zone})؟ سيتم حذفه نهائياً من النظام.`
+                  : `Are you sure you want to delete section "${itemToDelete.item_name}" in (${itemToDelete.zone})? It will be permanently removed.`}
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  disabled={Boolean(deletingId)}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, padding: '0.65rem', fontWeight: '600' }}
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={Boolean(deletingId)}
+                  className="btn btn-danger"
+                  style={{ flex: 1, padding: '0.65rem', fontWeight: '700', background: 'var(--danger)', color: '#fff' }}
+                >
+                  {deletingId ? (isAr ? 'جاري الحذف...' : 'Deleting...') : (isAr ? 'نعم، احذف' : 'Yes, Delete')}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
