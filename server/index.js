@@ -673,6 +673,31 @@ app.put('/api/materials-consumption/:id', async (req, res) => {
       saveJsonFallback('materials_consumption.json', jsonList);
     }
 
+    if (isSupabaseActive()) {
+      try {
+        await supabase.from('materials_consumption').update({
+          date: report.date,
+          day: report.day,
+          start_time: report.start_time,
+          end_time: report.end_time,
+          prepared_by: report.prepared_by,
+          basics: report.basics,
+          marble: report.marble,
+          sealants: report.sealants,
+          bulk: report.bulk,
+          notes: report.notes,
+          basics_notes: report.basics_notes,
+          marble_notes: report.marble_notes,
+          sealants_notes: report.sealants_notes,
+          bulk_notes: report.bulk_notes,
+          site_images: report.site_images,
+          updated_at: updatedAt
+        }).eq('id', id);
+      } catch (e) {
+        console.warn('Supabase materials update warning:', e.message);
+      }
+    }
+
     res.json({ ...report, id, updated_at: updatedAt });
   } catch (err) {
     console.error('Update consumption error:', err);

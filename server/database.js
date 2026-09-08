@@ -58,6 +58,8 @@ if (supabaseUrl && supabaseKey) {
   }
 }
 
+export const isSupabaseActive = () => Boolean(useSupabase && supabase);
+
 export const withTimeout = (promise, ms = 8000) => {
   return Promise.race([
     Promise.resolve(promise).catch(err => ({ data: null, error: err })),
@@ -131,6 +133,138 @@ export const saveJsonFallback = (filename, data) => {
     return true;
   } catch {
     return false;
+  }
+};
+
+// ── Cloud Hydration: Sync Supabase Cloud state down to SQLite on boot ──────
+export const syncFromCloudToLocal = async () => {
+  if (!isSupabaseActive()) return;
+  try {
+    console.log('🔄 Syncing local SQLite with Supabase Cloud...');
+
+    // 1. Sync Categories
+    const catRes = await safeSupa(supabase.from('categories').select('*').order('id', { ascending: true }));
+    if (catRes && !catRes.error && Array.isArray(catRes.data) && catRes.data.length > 0) {
+      await sqliteRun('DELETE FROM categories');
+      for (const c of catRes.data) {
+        await sqliteRun('INSERT OR REPLACE INTO categories (id, name) VALUES (?, ?)', [c.id, c.name]);
+      }
+    }
+
+    // 2. Sync Tasks
+    const taskRes = await safeSupa(supabase.from('tasks').select('*').order('id', { ascending: true }));
+    if (taskRes && !taskRes.error && Array.isArray(taskRes.data) && taskRes.data.length > 0) {
+      await sqliteRun('DELETE FROM tasks');
+      for (const t of taskRes.data) {
+        await sqliteRun(
+          'INSERT OR REPLACE INTO tasks (id, category_id, name, total_quantity, completed_quantity, progress_percent, unit, notes, is_manual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [t.id, t.category_id, t.name, t.total_quantity, t.completed_quantity, t.progress_percent, t.unit, t.notes, t.is_manual ? 1 : 0]
+        );
+      }
+    }
+
+    // 3. Sync Sub-units (Nazalat)
+    const subRes = await safeSupa(supabase.from('sub_units').select('*').order('serial_number', { ascending: true }));
+    if (subRes && !subRes.error && Array.isArray(subRes.data) && subRes.data.length > 0) {
+      await sqliteRun('DELETE FROM sub_units');
+      for (const s of subRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO sub_units (id, task_id, serial_number, zone, code, status, total_quantity, notes, white_marked, white_extra, white_applied, white_date, brown_marked, brown_extra, brown_applied, brown_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.id, s.task_id, s.serial_number, s.zone, s.code, s.status, s.total_quantity || 0, s.notes, s.white_marked || 0, s.white_extra || 0, s.white_applied || 0, s.white_date || '', s.brown_marked || 0, s.brown_extra || 0, s.brown_applied || 0, s.brown_date || '']
+        );
+      }
+    }
+
+    // 4. Sync Marble Distribution
+    const distRes = await safeSupa(supabase.from('marble_distribution').select('*').order('id', { ascending: true }));
+    if (distRes && !distRes.error && Array.isArray(distRes.data) && distRes.data.length > 0) {
+      await sqliteRun('DELETE FROM marble_distribution');
+      for (const m of distRes.data) {
+        await sqliteRun(
+          'INSERT OR REPLACE INTO marble_distribution (id, zone, task_name, white_qty, brown_qty, status) VALUES (?, ?, ?, ?, ?, ?)',
+          [m.id, m.zone, m.task_name, m.white_qty, m.brown_qty, m.status]
+        );
+      }
+    }
+
+    // 5. Sync Daily Updates
+    const updatesRes = await safeSupa(supabase.from('daily_updates').select('*').order('created_at', { ascending: true }));
+    if (updatesRes && !updatesRes.error && Array.isArray(updatesRes.data) && updatesRes.data.length > 0) {
+      await sqliteRun('DELETE FROM daily_updates');
+      for (const u of updatesRes.data) {
+        await sqliteRun(
+          'INSERT OR REPLACE INTO daily_updates (id, user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [u.id, u.user_id, u.sender_name, u.sender_role, u.message_text, u.media_url, u.media_type, u.reply_to_id, u.created_at]
+        );
+      }
+    }
+
+    // 6. Sync Materials Consumption
+    const matRes = await safeSupa(supabase.from('materials_consumption').select('*').order('date', { ascending: false }));
+    if (matRes && !matRes.error && Array.isArray(matRes.data) && matRes.data.length > 0) {
+      await sqliteRun('DELETE FROM materials_consumption');
+      for (const rep of matRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, basics_notes, marble_notes, sealants_notes, bulk_notes, site_images, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            rep.id, rep.date, rep.day, rep.start_time, rep.end_time, rep.prepared_by,
+            typeof rep.basics === 'object' ? JSON.stringify(rep.basics) : (rep.basics || '{}'),
+            typeof rep.marble === 'object' ? JSON.stringify(rep.marble) : (rep.marble || '{}'),
+            typeof rep.sealants === 'object' ? JSON.stringify(rep.sealants) : (rep.sealants || '{}'),
+            typeof rep.bulk === 'object' ? JSON.stringify(rep.bulk) : (rep.bulk || '{}'),
+            rep.notes || '', rep.basics_notes || '', rep.marble_notes || '', rep.sealants_notes || '', rep.bulk_notes || '',
+            typeof rep.site_images === 'object' ? JSON.stringify(rep.site_images) : (rep.site_images || '[]'),
+            rep.created_at
+          ]
+        );
+      }
+      saveJsonFallback('materials_consumption.json', matRes.data);
+    }
+
+    // 7. Sync Workers Wages
+    const wageRes = await safeSupa(supabase.from('workers_wages').select('*').order('work_date', { ascending: false }));
+    if (wageRes && !wageRes.error && Array.isArray(wageRes.data) && wageRes.data.length > 0) {
+      await sqliteRun('DELETE FROM workers_wages');
+      for (const w of wageRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, daily_rate, work_days, advance_payment, net_wage, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [String(w.id), w.work_date, w.work_item, w.worker_name, w.shifts_count, w.shift_price, w.total_amount, w.daily_rate || 0, w.work_days || 1, w.advance_payment || 0, w.net_wage || 0, w.notes, w.created_at]
+        );
+      }
+      saveJsonFallback('workers_wages.json', wageRes.data);
+    }
+
+    // 8. Sync Marblex Progress
+    const mbxRes = await safeSupa(supabase.from('marblex_progress').select('*').order('created_at', { ascending: true }));
+    if (mbxRes && !mbxRes.error && Array.isArray(mbxRes.data) && mbxRes.data.length > 0) {
+      await sqliteRun('DELETE FROM marblex_progress');
+      for (const m of mbxRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, m.pieces_progress, m.total_steel, m.applied_steel, m.steel_progress, m.overall_progress, m.status, m.notes, m.updated_by, m.created_at, m.updated_at]
+        );
+      }
+      saveJsonFallback('marblex_progress.json', mbxRes.data);
+    }
+
+    // 9. Sync Users
+    const userRes = await safeSupa(supabase.from('users').select('*').order('id', { ascending: true }));
+    if (userRes && !userRes.error && Array.isArray(userRes.data) && userRes.data.length > 0) {
+      for (const u of userRes.data) {
+        await sqliteRun(
+          'INSERT OR REPLACE INTO users (id, email, password, name, role) VALUES (?, ?, ?, ?, ?)',
+          [u.id, u.email, u.password, u.name, u.role]
+        );
+      }
+    }
+
+    console.log('✅ Local SQLite hydration from Supabase Cloud completed successfully.');
+  } catch (syncErr) {
+    console.warn('Cloud to local sync warning:', syncErr?.message || syncErr);
   }
 };
 
@@ -530,34 +664,50 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Sync active state from Supabase Cloud if available
+    if (isSupabaseActive()) {
+      await syncFromCloudToLocal();
+    }
+
     const marblexCount = await sqliteGet('SELECT COUNT(*) as count FROM marblex_progress');
     if (!marblexCount || marblexCount.count === 0) {
-      const defaultMarblex = [
-        { id: 'mbx-1', zone: 'Zone A', item_name: 'جدار الواجهة الرئيسي A-1', total_pieces: 120, applied_pieces: 120, total_steel: 60, applied_steel: 60, notes: 'مكتمل ومفحوص موقعياً بالكامل' },
-        { id: 'mbx-2', zone: 'Zone A', item_name: 'قاطع المدخل A-2', total_pieces: 95, applied_pieces: 80, total_steel: 45, applied_steel: 35, notes: 'استمرار تركيب وتثبيت الستيلات' },
-        { id: 'mbx-3', zone: 'Zone B1', item_name: 'جدار الممشى الداخلي B1-1', total_pieces: 150, applied_pieces: 110, total_steel: 75, applied_steel: 50, notes: 'توريد دفعة الستيل الإضافية' },
-        { id: 'mbx-4', zone: 'Zone B1', item_name: 'قاطع بهو الاستقبال B1-2', total_pieces: 80, applied_pieces: 40, total_steel: 40, applied_steel: 20, notes: 'قيد تثبيت الهيكل الحامل' },
-        { id: 'mbx-5', zone: 'Zone B2', item_name: 'جدار الصالة الخلفية B2-1', total_pieces: 140, applied_pieces: 70, total_steel: 70, applied_steel: 35, notes: 'تم استلام الشاقول والمناسيب الهندسية' },
-        { id: 'mbx-6', zone: 'Zone B2', item_name: 'قواطع الممرات الجانبية B2-2', total_pieces: 90, applied_pieces: 0, total_steel: 45, applied_steel: 0, notes: 'بانتظار إكمال أعمال التأسيسات' },
-        { id: 'mbx-7', zone: 'Zone C', item_name: 'جدار القاعة الكبرى C-1', total_pieces: 200, applied_pieces: 160, total_steel: 100, applied_steel: 80, notes: 'نسبة تقدم ممتازة ومطابقة للمواصفة' },
-        { id: 'mbx-8', zone: 'Zone C', item_name: 'قاطع الكاليري C-2', total_pieces: 110, applied_pieces: 0, total_steel: 55, applied_steel: 0, notes: 'متبقي، لم تبدأ الأعمال بعد' }
-      ];
+      const jsonList = getJsonFallback('marblex_progress.json', []);
+      if (jsonList && jsonList.length > 0) {
+        for (const m of jsonList) {
+          await sqliteRun(`
+            INSERT OR REPLACE INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, m.pieces_progress, m.total_steel, m.applied_steel, m.steel_progress, m.overall_progress, m.status, m.notes, m.updated_by, m.created_at, m.updated_at]);
+        }
+        console.log(`Restored ${jsonList.length} marblex progress records from json fallback.`);
+      } else if (!isSupabaseActive()) {
+        const defaultMarblex = [
+          { id: 'mbx-1', zone: 'Zone A', item_name: 'جدار الواجهة الرئيسي A-1', total_pieces: 120, applied_pieces: 120, total_steel: 60, applied_steel: 60, notes: 'مكتمل ومفحوص موقعياً بالكامل' },
+          { id: 'mbx-2', zone: 'Zone A', item_name: 'قاطع المدخل A-2', total_pieces: 95, applied_pieces: 80, total_steel: 45, applied_steel: 35, notes: 'استمرار تركيب وتثبيت الستيلات' },
+          { id: 'mbx-3', zone: 'Zone B1', item_name: 'جدار الممشى الداخلي B1-1', total_pieces: 150, applied_pieces: 110, total_steel: 75, applied_steel: 50, notes: 'توريد دفعة الستيل الإضافية' },
+          { id: 'mbx-4', zone: 'Zone B1', item_name: 'قاطع بهو الاستقبال B1-2', total_pieces: 80, applied_pieces: 40, total_steel: 40, applied_steel: 20, notes: 'قيد تثبيت الهيكل الحامل' },
+          { id: 'mbx-5', zone: 'Zone B2', item_name: 'جدار الصالة الخلفية B2-1', total_pieces: 140, applied_pieces: 70, total_steel: 70, applied_steel: 35, notes: 'تم استلام الشاقول والمناسيب الهندسية' },
+          { id: 'mbx-6', zone: 'Zone B2', item_name: 'قواطع الممرات الجانبية B2-2', total_pieces: 90, applied_pieces: 0, total_steel: 45, applied_steel: 0, notes: 'بانتظار إكمال أعمال التأسيسات' },
+          { id: 'mbx-7', zone: 'Zone C', item_name: 'جدار القاعة الكبرى C-1', total_pieces: 200, applied_pieces: 160, total_steel: 100, applied_steel: 80, notes: 'نسبة تقدم ممتازة ومطابقة للمواصفة' },
+          { id: 'mbx-8', zone: 'Zone C', item_name: 'قاطع الكاليري C-2', total_pieces: 110, applied_pieces: 0, total_steel: 55, applied_steel: 0, notes: 'متبقي، لم تبدأ الأعمال بعد' }
+        ];
 
-      for (const m of defaultMarblex) {
-        const pProg = m.total_pieces > 0 ? parseFloat(((m.applied_pieces / m.total_pieces) * 100).toFixed(2)) : 0;
-        const sProg = m.total_steel > 0 ? parseFloat(((m.applied_steel / m.total_steel) * 100).toFixed(2)) : 0;
-        const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
-        let status = 'قيد التنفيذ';
-        if (oProg >= 100) status = 'منجز';
-        else if (oProg === 0) status = 'غير مطبق';
+        for (const m of defaultMarblex) {
+          const pProg = m.total_pieces > 0 ? parseFloat(((m.applied_pieces / m.total_pieces) * 100).toFixed(2)) : 0;
+          const sProg = m.total_steel > 0 ? parseFloat(((m.applied_steel / m.total_steel) * 100).toFixed(2)) : 0;
+          const oProg = parseFloat(((pProg + sProg) / 2).toFixed(2));
+          let status = 'قيد التنفيذ';
+          if (oProg >= 100) status = 'منجز';
+          else if (oProg === 0) status = 'غير مطبق';
 
-        await sqliteRun(`
-          INSERT INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, pProg, m.total_steel, m.applied_steel, sProg, oProg, status, m.notes, 'المهندس المقيم']);
+          await sqliteRun(`
+            INSERT INTO marblex_progress (id, zone, item_name, total_pieces, applied_pieces, pieces_progress, total_steel, applied_steel, steel_progress, overall_progress, status, notes, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [m.id, m.zone, m.item_name, m.total_pieces, m.applied_pieces, pProg, m.total_steel, m.applied_steel, sProg, oProg, status, m.notes, 'المهندس المقيم']);
+        }
+        saveJsonFallback('marblex_progress.json', defaultMarblex);
+        console.log(`Seeded ${defaultMarblex.length} marblex progress records.`);
       }
-      saveJsonFallback('marblex_progress.json', defaultMarblex);
-      console.log(`Seeded ${defaultMarblex.length} marblex progress records.`);
     }
 
     console.log('Database schema & records verified successfully.');
@@ -568,8 +718,6 @@ export const initDatabase = async () => {
 
 // Initialize immediately on module load
 initDatabase();
-
-export const isSupabaseActive = () => Boolean(useSupabase && supabase);
 
 // ── Unified Database Abstraction ────────────────────────────────────────────
 
@@ -662,6 +810,12 @@ export const dbGet = async (sql, params = []) => {
     try {
       const sqlClean = sql.replace(/\s+/g, ' ').trim();
 
+      // Tasks lookup
+      if (sqlClean.includes('FROM tasks WHERE id = ?')) {
+        const result = await safeSupa(supabase.from('tasks').select('*').eq('id', params[0]).maybeSingle());
+        if (result && result.data) return result.data;
+      }
+
       // Users lookup
       if (sqlClean.includes('FROM users WHERE')) {
         if (sqlClean.includes('password = ?')) {
@@ -703,6 +857,28 @@ export const dbGet = async (sql, params = []) => {
         if (result && result.data) return result.data;
       }
 
+      // Materials consumption item
+      if (sqlClean.includes('FROM materials_consumption WHERE id = ?')) {
+        const result = await safeSupa(supabase.from('materials_consumption').select('*').eq('id', params[0]).maybeSingle());
+        if (result && result.data) {
+          const r = result.data;
+          return {
+            ...r,
+            basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : (r.basics || {}),
+            marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : (r.marble || {}),
+            sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : (r.sealants || {}),
+            bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : (r.bulk || {}),
+          };
+        }
+      }
+
+      // Workers wages item
+      if (sqlClean.includes('FROM workers_wages WHERE id = ?')) {
+        const numId = parseInt(params[0], 10);
+        const result = await safeSupa(supabase.from('workers_wages').select('*').eq('id', numId || params[0]).maybeSingle());
+        if (result && result.data) return result.data;
+      }
+
       // Marblex item
       if (sqlClean.includes('FROM marblex_progress WHERE id = ?')) {
         const result = await safeSupa(supabase.from('marblex_progress').select('*').eq('id', params[0]).maybeSingle());
@@ -724,13 +900,13 @@ export const dbAll = async (sql, params = []) => {
       // 1. Categories
       if (sqlClean.includes('FROM categories')) {
         const result = await safeSupa(supabase.from('categories').select('*').order('id', { ascending: true }));
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 2. Tasks with Category Name
       if (sqlClean.includes('FROM tasks') && (sqlClean.includes('JOIN categories') || sqlClean.includes('categories c'))) {
         const result = await safeSupa(supabase.from('tasks').select('*, categories(name)').order('id', { ascending: true }));
-        if (result && result.data && result.data.length > 0) {
+        if (result && !result.error && Array.isArray(result.data)) {
           return result.data.map(t => ({
             ...t,
             category_name: t.categories?.name || ''
@@ -741,13 +917,13 @@ export const dbAll = async (sql, params = []) => {
       // 3. All Tasks
       if (sqlClean === 'SELECT * FROM tasks' || sqlClean.startsWith('SELECT * FROM tasks ORDER BY')) {
         const result = await safeSupa(supabase.from('tasks').select('*').order('id', { ascending: true }));
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 4. Sub-units (Nazalat) Aggregation (Dashboard KPIs)
       if (sqlClean.includes('FROM sub_units') && sqlClean.includes('GROUP BY zone, status')) {
         const result = await safeSupa(supabase.from('sub_units').select('zone, status'));
-        if (result && result.data && result.data.length > 0) {
+        if (result && !result.error && Array.isArray(result.data)) {
           const map = {};
           result.data.forEach(item => {
             const key = `${item.zone}:::${item.status}`;
@@ -782,19 +958,19 @@ export const dbAll = async (sql, params = []) => {
           q = q.eq('status', params[0]);
         }
         const result = await safeSupa(q);
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 6. Marble Distribution
       if (sqlClean.includes('FROM marble_distribution')) {
         const result = await safeSupa(supabase.from('marble_distribution').select('*').order('id', { ascending: true }));
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 7. Daily Updates
       if (sqlClean.includes('FROM daily_updates')) {
         const result = await safeSupa(supabase.from('daily_updates').select('*').order('created_at', { ascending: true }));
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 8. Materials Consumption
@@ -802,7 +978,15 @@ export const dbAll = async (sql, params = []) => {
         const result = await safeSupa(
           supabase.from('materials_consumption').select('*').order('date', { ascending: false }).order('created_at', { ascending: false })
         );
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) {
+          return result.data.map(r => ({
+            ...r,
+            basics: typeof r.basics === 'string' ? JSON.parse(r.basics || '{}') : (r.basics || {}),
+            marble: typeof r.marble === 'string' ? JSON.parse(r.marble || '{}') : (r.marble || {}),
+            sealants: typeof r.sealants === 'string' ? JSON.parse(r.sealants || '{}') : (r.sealants || {}),
+            bulk: typeof r.bulk === 'string' ? JSON.parse(r.bulk || '{}') : (r.bulk || {}),
+          }));
+        }
       }
 
       // 9. Workers Wages
@@ -810,7 +994,7 @@ export const dbAll = async (sql, params = []) => {
         const result = await safeSupa(
           supabase.from('workers_wages').select('*').order('work_date', { ascending: false }).order('created_at', { ascending: false })
         );
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 10. Users List
@@ -818,7 +1002,7 @@ export const dbAll = async (sql, params = []) => {
         const result = await safeSupa(
           supabase.from('users').select('id, email, name, role, password').order('id', { ascending: true })
         );
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
 
       // 11. Marblex Progress
@@ -832,7 +1016,7 @@ export const dbAll = async (sql, params = []) => {
           q = q.eq('status', params[0]);
         }
         const result = await safeSupa(q);
-        if (result && result.data && result.data.length > 0) return result.data;
+        if (result && !result.error && Array.isArray(result.data)) return result.data;
       }
     } catch (supabaseErr) {
       console.warn('Supabase dbAll fallback:', supabaseErr?.message || supabaseErr);
