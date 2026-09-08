@@ -5,22 +5,34 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = path.join(__dirname, 'project.db');
+const envPath = path.resolve(__dirname, '../.env');
 
+// Force override from .env so any old process.env inherited by nodemon is overwritten
+dotenv.config({ path: envPath, override: true });
+dotenv.config({ override: true });
+
+const dbPath = path.join(__dirname, 'project.db');
 const sqliteDb = new sqlite3.Database(dbPath);
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+// Hard safeguard: Never allow the old decommissioned project URL (xzlsrqtptuspoqovbgpg)
+let supabaseUrl = process.env.SUPABASE_URL;
+let supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || supabaseUrl.includes('xzlsrqtptuspoqovbgpg')) {
+  console.warn('Overriding outdated or missing Supabase URL with active cloud URL.');
+  supabaseUrl = 'https://dmplquohltuocdjajwzq.supabase.co';
+}
+if (!supabaseKey || supabaseKey.includes('placeholder')) {
+  supabaseKey = 'sb_publishable_pcl28wueyhYMoIMcIUZJcg_kgO-TsED';
+}
 
 let supabase = null;
 let useSupabase = false;
 let supabaseReady = false;
 
-if (supabaseUrl && supabaseKey && !supabaseUrl.includes('placeholder')) {
+if (supabaseUrl && supabaseKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
     useSupabase = true;
