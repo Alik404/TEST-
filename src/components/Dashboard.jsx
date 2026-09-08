@@ -33,25 +33,40 @@ export default function Dashboard({ kpis, tasks, categories, user, onUpdateProgr
   const [tempNotes, setTempNotes] = useState({});
   const [savingId, setSavingId] = useState(null);
 
+  // Safeguard props against null or undefined values to prevent UI crash
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  const safeKpis = kpis || {
+    total_marble_pieces: 0,
+    applied_marble_pieces: 0,
+    applied_white_marble: 0,
+    applied_brown_marble: 0,
+    overall_progress_percent: 0,
+    skylight_progress_percent: 0,
+    nazalat_total: 0,
+    nazalat_completed: 0,
+    nazalat_progress_percent: 0
+  };
+
   // Group tasks by category
-  const groupedTasks = categories.reduce((acc, cat) => {
-    acc[cat.name] = tasks.filter(t => t.category_name === cat.name);
+  const groupedTasks = safeCategories.reduce((acc, cat) => {
+    acc[cat.name] = safeTasks.filter(t => t.category_name === cat.name);
     return acc;
   }, {});
 
   // Prepare chart data for task progress
-  const chartData = tasks.map(t => {
-    const cleanName = t.name.replace(' (محدث تلقائياً)', '').replace(' (تحديث تلقائي)', '');
+  const chartData = safeTasks.map(t => {
+    const cleanName = (t.name || '').replace(' (محدث تلقائياً)', '').replace(' (تحديث تلقائي)', '');
     return {
       name: translateText(cleanName, lang),
-      [lang === 'ar' ? 'نسبة الإنجاز %' : 'Progress %']: parseFloat(t.progress_percent.toFixed(1))
+      [lang === 'ar' ? 'نسبة الإنجاز %' : 'Progress %']: parseFloat((Number(t.progress_percent) || 0).toFixed(1))
     };
   });
 
   // Prepare pie chart data for marble pieces (White vs Brown)
   const marbleChartData = [
-    { name: lang === 'ar' ? 'مرمر أبيض مطبق' : 'Applied White Marble', value: kpis.applied_white_marble || 0, color: '#eef2f7' },
-    { name: lang === 'ar' ? 'مرمر جوزي مطبق' : 'Applied Brown Marble', value: kpis.applied_brown_marble || 0, color: 'hsl(35, 90%, 52%)' }
+    { name: lang === 'ar' ? 'مرمر أبيض مطبق' : 'Applied White Marble', value: safeKpis.applied_white_marble || 0, color: '#eef2f7' },
+    { name: lang === 'ar' ? 'مرمر جوزي مطبق' : 'Applied Brown Marble', value: safeKpis.applied_brown_marble || 0, color: 'hsl(35, 90%, 52%)' }
   ];
 
   const handleEditClick = (task) => {
