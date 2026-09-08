@@ -225,7 +225,7 @@ export const syncFromCloudToLocal = async () => {
 
     // 7. Sync Workers Wages
     const wageRes = await safeSupa(supabase.from('workers_wages').select('*').order('work_date', { ascending: false }));
-    if (wageRes && !wageRes.error && Array.isArray(wageRes.data) && wageRes.data.length > 0) {
+    if (wageRes && !wageRes.error && Array.isArray(wageRes.data)) {
       await sqliteRun('DELETE FROM workers_wages');
       for (const w of wageRes.data) {
         await sqliteRun(
@@ -601,25 +601,18 @@ export const initDatabase = async () => {
       console.log(`Seeded ${historicalReports.length} materials consumption records.`);
     }
 
-    // Migrate & seed Workers Wages if SQLite is empty
+    // Sync Workers Wages if SQLite is empty
     const wagesCount = await sqliteGet('SELECT COUNT(*) as count FROM workers_wages');
     if (!wagesCount || wagesCount.count === 0) {
-      const historicalWages = [
-        { id: '1786520369375', work_date: '2026-08-02', work_item: 'رفع انقاض', worker_name: 'عمال ابو حيدر', shifts_count: 2, shift_price: 35000, total_amount: 70000, notes: 'بموافقة مهندس امير', created_at: '2026-08-12T07:39:29.375Z' },
-        { id: '1786012709387', work_date: '2026-08-02', work_item: 'تصنيف نزلات', worker_name: 'عمال ابو حيدر', shifts_count: 2, shift_price: 30000, total_amount: 60000, notes: 'اكمال تنظيف النزلات لأجل اكمال اعمال الجلي والشربتة', created_at: '2026-08-06T10:38:29.387Z' },
-        { id: '1786012607713', work_date: '2026-08-01', work_item: 'تصنيف نزلات', worker_name: 'عمال ابو حيدر', shifts_count: 2, shift_price: 30000, total_amount: 60000, notes: 'اكمال تنظيف النزلات لأجل اكمال اعمال الجلي والشربتة', created_at: '2026-08-06T10:36:47.713Z' },
-        { id: '1785000000001', work_date: '2026-07-21', work_item: 'تنظيف جوينات', worker_name: 'عمال ابو حيدر', shifts_count: 2, shift_price: 30000, total_amount: 60000, notes: 'تنظيف النزلات لأجل اكمال هناك الشربت', created_at: '2026-07-21T09:00:00.000Z' },
-        { id: '1785000000002', work_date: '2026-07-20', work_item: 'تنظيف نزلات', worker_name: 'عمال ابو حيدر', shifts_count: 2, shift_price: 30000, total_amount: 60000, notes: 'استمرار تنظيف نزلات زون A', created_at: '2026-07-20T09:00:00.000Z' }
-      ];
-
-      for (const w of historicalWages) {
-        await sqliteRun(`
-          INSERT INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [w.id, w.work_date, w.work_item, w.worker_name, w.shifts_count, w.shift_price, w.total_amount, w.notes, w.created_at]);
+      if (!isSupabaseActive()) {
+        const jsonWages = getJsonFallback('workers_wages.json', []);
+        for (const w of jsonWages) {
+          await sqliteRun(`
+            INSERT OR REPLACE INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [String(w.id), w.work_date, w.work_item, w.worker_name, w.shifts_count, w.shift_price, w.total_amount, w.notes, w.created_at]);
+        }
       }
-      saveJsonFallback('workers_wages.json', historicalWages);
-      console.log(`Seeded ${historicalWages.length} workers wages records.`);
     }
 
     // Migrate & seed Weekly Advance if SQLite is empty

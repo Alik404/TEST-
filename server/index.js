@@ -768,7 +768,7 @@ app.get('/api/workers-wages', async (req, res) => {
           .select('*')
           .order('work_date', { ascending: false })
           .order('created_at', { ascending: false });
-        if (data && !error && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           return res.json(data);
         }
       } catch (e) {
@@ -790,14 +790,44 @@ app.post('/api/workers-wages', async (req, res) => {
     return res.status(400).json({ error: 'تاريخ العمل والفقرة مطلوبة.' });
   }
 
-  const id = record.id || Date.now().toString();
   const shiftsCount = Number(record.shifts_count) || 1;
   const shiftPrice = Number(record.shift_price) || 0;
   const totalAmount = shiftsCount * shiftPrice;
   const createdAt = new Date().toISOString();
 
+  let assignedId = null;
+
+  if (isSupabaseActive()) {
+    try {
+      const supaPayload = {
+        work_date: record.work_date,
+        work_item: record.work_item,
+        worker_name: record.worker_name || 'عمال ابو حيدر',
+        shifts_count: shiftsCount,
+        shift_price: shiftPrice,
+        total_amount: totalAmount,
+        notes: record.notes || null,
+        created_at: createdAt
+      };
+      const { data: supaData, error: supaErr } = await supabase
+        .from('workers_wages')
+        .insert([supaPayload])
+        .select();
+
+      if (supaErr) {
+        console.error('Supabase wage insert error:', supaErr.message);
+      } else if (supaData && supaData[0]) {
+        assignedId = supaData[0].id;
+      }
+    } catch (e) {
+      console.warn('Supabase wage insert exception:', e.message);
+    }
+  }
+
+  const finalId = assignedId ? String(assignedId) : (record.id || String(Date.now()));
+
   const newWage = {
-    id,
+    id: finalId,
     work_date: record.work_date,
     work_item: record.work_item,
     worker_name: record.worker_name || 'عمال ابو حيدر',
@@ -810,32 +840,13 @@ app.post('/api/workers-wages', async (req, res) => {
 
   try {
     await sqliteRun(`
-      INSERT INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, notes, created_at)
+      INSERT OR REPLACE INTO workers_wages (id, work_date, work_item, worker_name, shifts_count, shift_price, total_amount, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [newWage.id, newWage.work_date, newWage.work_item, newWage.worker_name, newWage.shifts_count, newWage.shift_price, newWage.total_amount, newWage.notes, newWage.created_at]);
 
     const jsonList = getJsonFallback('workers_wages.json', []);
     jsonList.unshift(newWage);
     saveJsonFallback('workers_wages.json', jsonList);
-
-    if (isSupabaseActive()) {
-      try { 
-        const numId = parseInt(newWage.id, 10) || Date.now();
-        await supabase.from('workers_wages').insert([{
-          id: numId,
-          work_date: newWage.work_date,
-          work_item: newWage.work_item,
-          worker_name: newWage.worker_name,
-          shifts_count: newWage.shifts_count,
-          shift_price: newWage.shift_price,
-          total_amount: newWage.total_amount,
-          notes: newWage.notes || null,
-          created_at: newWage.created_at
-        }]); 
-      } catch (e) {
-        console.warn('Supabase wage insert warning:', e.message);
-      }
-    }
 
     res.status(201).json(newWage);
   } catch (err) {
@@ -877,7 +888,7 @@ app.put('/api/workers-wages/:id', async (req, res) => {
           shift_price: shiftPrice,
           total_amount: totalAmount,
           notes: record.notes || null
-        }).eq('id', numId || id);
+        }).eq('id', !isNaN(numId) ? numId : id);
       } catch (e) {
         console.warn('Supabase wage update warning:', e.message);
       }
@@ -902,7 +913,7 @@ app.delete('/api/workers-wages/:id', async (req, res) => {
     if (isSupabaseActive()) {
       try { 
         const numId = parseInt(id, 10);
-        await supabase.from('workers_wages').delete().eq('id', numId || id); 
+        await supabase.from('workers_wages').delete().eq('id', !isNaN(numId) ? numId : id); 
       } catch (e) {
         console.warn('Supabase wage delete warning:', e.message);
       }
