@@ -1,6 +1,6 @@
 import {
   BarChart3, LayoutDashboard, ClipboardList, Boxes, Layers,
-  FileText, Banknote, Receipt, MessageSquare, Users
+  FileText, Banknote, Receipt, MessageSquare, Users, Ruler
 } from 'lucide-react';
 
 /**
@@ -41,6 +41,16 @@ export const SECTIONS = [
     titleKey: 'headerMarblexTitle',
     subtitleKey: 'headerMarblexSubtitle',
     bottom: true,
+  },
+  {
+    id: 'joints-daily',
+    group: 'site',
+    icon: Ruler,
+    label: { ar: 'تقدم أعمال الجوينات اليومي', en: 'Daily Joints Progress' },
+    short: { ar: 'الجوينات', en: 'Joints' },
+    titleKey: 'headerJointsTitle',
+    subtitleKey: 'headerJointsSubtitle',
+    bottom: false,
   },
   {
     id: 'marble',

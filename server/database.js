@@ -289,6 +289,20 @@ export const syncFromCloudToLocal = async () => {
       saveJsonFallback('weekly_advance.json', advRes.data);
     }
 
+    // 11. Sync Daily Joints Progress (if present in Supabase)
+    const jointsRes = await safeSupa(supabase.from('joints_daily').select('*').order('report_date', { ascending: false }));
+    if (jointsRes && !jointsRes.error && Array.isArray(jointsRes.data)) {
+      await sqliteRun('DELETE FROM joints_daily');
+      for (const j of jointsRes.data) {
+        await sqliteRun(
+          `INSERT OR REPLACE INTO joints_daily (id, report_date, workers_count, notes, data, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [String(j.id), j.report_date, j.workers_count || 0, j.notes || '', typeof j.data === 'object' ? JSON.stringify(j.data) : (j.data || '{}'), j.created_at, j.updated_at || null]
+        );
+      }
+      saveJsonFallback('joints_daily.json', jointsRes.data);
+    }
+
     console.log('Local SQLite hydration from Supabase Cloud completed successfully.');
   } catch (syncErr) {
     console.warn('Cloud to local sync warning:', syncErr?.message || syncErr);
@@ -564,6 +578,30 @@ export const initDatabase = async () => {
             adv.created_at || new Date().toISOString()
           ]);
         }
+      }
+    }
+
+    // 9b. Daily joints progress table (one row per work day, rows kept in `data`)
+    await sqliteRun(`
+      CREATE TABLE IF NOT EXISTS joints_daily (
+        id TEXT PRIMARY KEY,
+        report_date TEXT NOT NULL,
+        workers_count INTEGER DEFAULT 0,
+        notes TEXT,
+        data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      )
+    `);
+
+    const jointsCount = await sqliteGet('SELECT COUNT(*) as count FROM joints_daily');
+    if ((!jointsCount || jointsCount.count === 0) && !isSupabaseActive()) {
+      for (const j of getJsonFallback('joints_daily.json', [])) {
+        await sqliteRun(
+          `INSERT OR IGNORE INTO joints_daily (id, report_date, workers_count, notes, data, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [String(j.id), j.report_date, j.workers_count || 0, j.notes || '', typeof j.data === 'object' ? JSON.stringify(j.data) : (j.data || '{}'), j.created_at || new Date().toISOString(), j.updated_at || null]
+        );
       }
     }
 

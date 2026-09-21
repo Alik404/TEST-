@@ -1558,6 +1558,169 @@ app.delete('/api/users/:id', requireSuperAdmin, async (req, res) => {
 const clientDistPath = path.join(__dirname, '../dist');
 app.use(express.static(clientDistPath));
 
+// ── 9.6 Daily Joints Progress (الجوينات اليومية) ────────────────────────────
+// One record per work day. `data` holds the rows of the paper sheet:
+//   rows: [{ type: 'horizontal'|'vertical', item, count, length }]
+// plus sealant_rate. Totals are always derived (count x length), never stored.
+
+const JOINT_TYPES = new Set(['horizontal', 'vertical']);
+
+const parseJointsData = (raw) => {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return {}; }
+};
+
+// Accepts only well-formed rows so a bad client cannot store junk totals.
+const sanitizeJointsBody = (body = {}) => {
+  const rows = Array.isArray(body.data?.rows) ? body.data.rows : [];
+  const cleanRows = rows
+    .map(r => ({
+      type: JOINT_TYPES.has(r?.type) ? r.type : 'horizontal',
+      item: String(r?.item ?? '').trim().slice(0, 120),
+      count: Math.max(0, Math.min(1000, Number(r?.count) || 0)),
+      length: Math.max(0, Math.min(1000, Number(r?.length) || 0)),
+    }))
+    .filter(r => r.item && r.count > 0 && r.length > 0)
+    .slice(0, 50);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.report_date || '')) ? body.report_date : null;
+  const workers = Math.max(0, Math.min(500, parseInt(body.workers_count, 10) || 0));
+  const rateRaw = body.data?.sealant_rate;
+  const sealantRate = rateRaw === '' || rateRaw === null || rateRaw === undefined ? '' : String(rateRaw).slice(0, 20);
+  return {
+    report_date: date,
+    workers_count: workers,
+    notes: String(body.notes ?? '').slice(0, 2000),
+    data: { rows: cleanRows, sealant_rate: sealantRate },
+  };
+};
+
+const jointsTotal = (data) => (data.rows || []).reduce((s, r) => s + r.count * r.length, 0);
+
+const normalizeJointsRow = (r) => ({ ...r, id: String(r.id), data: parseJointsData(r.data) });
+
+// Mirror the local table to the JSON fallback so records survive a fresh SQLite file.
+const mirrorJointsToJson = async () => {
+  const rows = await sqliteAll('SELECT * FROM joints_daily ORDER BY report_date DESC, created_at DESC');
+  saveJsonFallback('joints_daily.json', rows.map(normalizeJointsRow));
+};
+
+app.get('/api/joints-daily', requireAuth, async (req, res) => {
+  try {
+    if (isSupabaseActive()) {
+      try {
+        const { data, error } = await supabase
+          .from('joints_daily')
+          .select('*')
+          .order('report_date', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data)) return res.json(data.map(normalizeJointsRow));
+      } catch (e) {
+        console.warn('Supabase joints_daily read fallback:', e.message);
+      }
+    }
+    const rows = await sqliteAll('SELECT * FROM joints_daily ORDER BY report_date DESC, created_at DESC');
+    res.json(rows.map(normalizeJointsRow));
+  } catch (err) {
+    console.error('Fetch joints_daily error:', err);
+    res.status(500).json({ error: 'تعذر تحميل سجل الجوينات.' });
+  }
+});
+
+app.post('/api/joints-daily', requireEditor, async (req, res) => {
+  const clean = sanitizeJointsBody(req.body);
+  if (!clean.report_date) return res.status(400).json({ error: 'تاريخ الجرد مطلوب.' });
+  if (clean.data.rows.length === 0) return res.status(400).json({ error: 'أضف فقرة واحدة على الأقل بعدد نزلات وطول صحيحين.' });
+
+  const record = {
+    id: `${Date.now()}`,
+    ...clean,
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    await sqliteRun(
+      'INSERT INTO joints_daily (id, report_date, workers_count, notes, data, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [record.id, record.report_date, record.workers_count, record.notes, JSON.stringify(record.data), record.created_at]
+    );
+    await mirrorJointsToJson();
+
+    if (isSupabaseActive()) {
+      try {
+        const { error } = await supabase.from('joints_daily').insert([record]);
+        if (error) console.warn('Supabase joints_daily insert warning:', error.message);
+      } catch (e) {
+        console.warn('Supabase joints_daily insert warning:', e.message);
+      }
+    }
+
+    const actionText = `قام (${req.user.name}) بتسجيل جرد الجوينات ليوم ${record.report_date} - المجموع: ${jointsTotal(record.data).toLocaleString('en-US')} متر`;
+    await dbRun(
+      `INSERT INTO daily_updates (user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id)
+       VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)`,
+      ['النظام', 'system', actionText]
+    );
+
+    res.status(201).json(record);
+  } catch (err) {
+    console.error('Create joints_daily error:', err);
+    res.status(500).json({ error: 'تعذر حفظ جرد الجوينات.' });
+  }
+});
+
+app.put('/api/joints-daily/:id', requireEditor, async (req, res) => {
+  const { id } = req.params;
+  const clean = sanitizeJointsBody(req.body);
+  if (!clean.report_date) return res.status(400).json({ error: 'تاريخ الجرد مطلوب.' });
+  if (clean.data.rows.length === 0) return res.status(400).json({ error: 'أضف فقرة واحدة على الأقل بعدد نزلات وطول صحيحين.' });
+  const updatedAt = new Date().toISOString();
+
+  try {
+    const result = await sqliteRun(
+      'UPDATE joints_daily SET report_date = ?, workers_count = ?, notes = ?, data = ?, updated_at = ? WHERE id = ?',
+      [clean.report_date, clean.workers_count, clean.notes, JSON.stringify(clean.data), updatedAt, id]
+    );
+    await mirrorJointsToJson();
+
+    let cloudUpdated = false;
+    if (isSupabaseActive()) {
+      try {
+        const { error } = await supabase.from('joints_daily').update({ ...clean, updated_at: updatedAt }).eq('id', id);
+        cloudUpdated = !error;
+        if (error) console.warn('Supabase joints_daily update warning:', error.message);
+      } catch (e) {
+        console.warn('Supabase joints_daily update warning:', e.message);
+      }
+    }
+
+    if (!result.changes && !cloudUpdated) return res.status(404).json({ error: 'السجل غير موجود.' });
+    res.json({ id, ...clean, updated_at: updatedAt });
+  } catch (err) {
+    console.error('Update joints_daily error:', err);
+    res.status(500).json({ error: 'تعذر تعديل جرد الجوينات.' });
+  }
+});
+
+app.delete('/api/joints-daily/:id', requireEditor, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await sqliteRun('DELETE FROM joints_daily WHERE id = ?', [id]);
+    await mirrorJointsToJson();
+    if (isSupabaseActive()) {
+      try {
+        const { error } = await supabase.from('joints_daily').delete().eq('id', id);
+        if (error) console.warn('Supabase joints_daily delete warning:', error.message);
+      } catch (e) {
+        console.warn('Supabase joints_daily delete warning:', e.message);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete joints_daily error:', err);
+    res.status(500).json({ error: 'تعذر حذف جرد الجوينات.' });
+  }
+});
+
 app.get('/*any', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     return next();
