@@ -1,180 +1,124 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Layers, Plus, Printer, Search, Edit3, Trash2, CheckCircle2, 
-  Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy,
-  Award, TrendingUp, LayoutGrid, Table
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Plus, Printer, Search, Pencil, Trash2, Copy, Save, Layers, BarChart2, Award,
+  SearchX, AlertTriangle, RefreshCw, Boxes
 } from 'lucide-react';
-import { apiFetch } from '../utils/api';
+import { apiFetch, apiErrorMessage } from '../utils/api';
+import { num, pct } from '../utils/format';
+import { toast } from '../utils/toast';
+import { buildReport, openReport, h, docCode } from '../utils/report';
+import { canEdit } from '../navigation';
+import { StatCard, ProgressBar, EmptyState, Chips, Modal, Field, ConfirmDialog, LoadingBlock } from './ui';
 
-export default function MarblexProgress({ user, lang, t }) {
+const ZONES = ['Zone A', 'Zone B1', 'Zone B2', 'Zone C'];
+const DONE = 'منجز';
+const ACTIVE = 'قيد التنفيذ';
+const NOT_APPLIED = 'غير مطبق';
+
+const isRemaining = (s) => s === NOT_APPLIED || s === 'متبقي';
+
+const statusTone = (s) => (s === DONE ? 'success' : s === ACTIVE ? 'warn' : 'outline');
+
+const statusLabel = (s, isAr) => {
+  if (s === DONE) return isAr ? 'منجز' : 'Completed';
+  if (s === ACTIVE) return isAr ? 'قيد التنفيذ' : 'In progress';
+  return isAr ? 'غير مطبق' : 'Not applied';
+};
+
+const EMPTY_FORM = {
+  zone: 'Zone A', item_name: '', total_pieces: '', applied_pieces: '',
+  total_steel: '', applied_steel: '', notes: '', status: 'auto',
+};
+
+const computeStats = (list) => {
+  let totPieces = 0, appPieces = 0, totSteel = 0, appSteel = 0;
+  list.forEach(i => {
+    totPieces += Number(i.total_pieces) || 0;
+    appPieces += Number(i.applied_pieces) || 0;
+    totSteel += Number(i.total_steel) || 0;
+    appSteel += Number(i.applied_steel) || 0;
+  });
+  const piecesProg = totPieces > 0 ? parseFloat(((appPieces / totPieces) * 100).toFixed(2)) : 0;
+  const steelProg = totSteel > 0 ? parseFloat(((appSteel / totSteel) * 100).toFixed(2)) : 0;
+  let overallProg = 0;
+  if (totPieces > 0 && totSteel > 0) overallProg = parseFloat(((piecesProg + steelProg) / 2).toFixed(2));
+  else if (totPieces > 0) overallProg = piecesProg;
+  else if (totSteel > 0) overallProg = steelProg;
+  return {
+    count: list.length, totPieces, appPieces, remPieces: totPieces - appPieces, piecesProg,
+    totSteel, appSteel, remSteel: totSteel - appSteel, steelProg, overallProg,
+    completedCount: list.filter(i => i.status === DONE).length,
+    inProgressCount: list.filter(i => i.status === ACTIVE).length,
+    remainingCount: list.filter(i => isRemaining(i.status)).length,
+  };
+};
+
+export default function MarblexProgress({ user, lang }) {
   const isAr = lang === 'ar';
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const editable = canEdit(user);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
-  // View mode: 'table' or 'cards' (default to cards on mobile)
-  const [viewMode, setViewMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'));
+  const [zone, setZone] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [query, setQuery] = useState('');
 
-  // Filters
-  const [selectedZone, setSelectedZone] = useState('ALL'); // 'ALL' | 'Zone A' | 'Zone B1' | 'Zone B2' | 'Zone C'
-  const [selectedStatus, setSelectedStatus] = useState('ALL'); // 'ALL' | 'منجز' | 'قيد التنفيذ' | 'غير مطبق'
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [isCloneMode, setIsCloneMode] = useState(false);
-  const [formData, setFormData] = useState({
-    zone: 'Zone A',
-    item_name: '',
-    total_pieces: '',
-    applied_pieces: '',
-    total_steel: '',
-    applied_steel: '',
-    notes: '',
-    status: 'auto'
-  });
+  const [isClone, setIsClone] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-  const [itemToDelete, setItemToDelete] = useState(null);
+  const [toDelete, setToDelete] = useState(null);
 
-  const zonesList = [
-    { id: 'ALL', label: isAr ? 'جميع الزونات' : 'All Zones' },
-    { id: 'Zone A', label: 'Zone A' },
-    { id: 'Zone B1', label: 'Zone B1' },
-    { id: 'Zone B2', label: 'Zone B2' },
-    { id: 'Zone C', label: 'Zone C' },
-  ];
-
-  const statusList = [
-    { id: 'ALL', label: isAr ? 'جميع الحالات' : 'All Statuses' },
-    { id: 'منجز', label: isAr ? 'مطبق بالكامل (منجز)' : 'Completed', color: 'var(--success)' },
-    { id: 'قيد التنفيذ', label: isAr ? 'قيد التنفيذ' : 'In Progress', color: 'var(--warning)' },
-    { id: 'غير مطبق', label: isAr ? 'غير مطبق (متبقي)' : 'Remaining', color: 'var(--danger)' },
-  ];
-
-  // Fetch data
-  const fetchMarblex = async () => {
-    setLoading(true);
-    setError('');
+  const load = async () => {
     try {
       const res = await apiFetch('/api/marblex');
-      if (!res.ok) throw new Error(isAr ? 'فشل جلب بيانات الماربلكس.' : 'Failed to fetch marblex data.');
-      const data = await res.json();
-      setItems(data);
+      if (!res.ok) throw new Error(isAr ? 'تعذر تحميل بيانات الماربلكس.' : 'Could not load Marblex data.');
+      setItems(await res.json());
+      setError('');
     } catch (err) {
-      console.error(err);
-      setError(err.message || (isAr ? 'حدث خطأ في جلب البيانات.' : 'Error loading data.'));
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchMarblex();
-  }, []);
+  // Load once when the section opens (deferred so no state is set during the effect).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { Promise.resolve().then(load); }, []);
 
-  // Filtered list
-  const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      const matchesZone = selectedZone === 'ALL' || item.zone === selectedZone;
-      const matchesStatus = selectedStatus === 'ALL' || item.status === selectedStatus;
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch = !q || 
-        (item.item_name || '').toLowerCase().includes(q) || 
-        (item.notes || '').toLowerCase().includes(q);
-      return matchesZone && matchesStatus && matchesSearch;
-    });
-  }, [items, selectedZone, selectedStatus, searchQuery]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter(i =>
+      (zone === 'all' || i.zone === zone) &&
+      (status === 'all' || (status === NOT_APPLIED ? isRemaining(i.status) : i.status === status)) &&
+      (!q || (i.item_name || '').toLowerCase().includes(q) || (i.notes || '').toLowerCase().includes(q)));
+  }, [items, zone, status, query]);
 
-  // Totals & KPI Metrics (computed dynamically from filtered items)
-  const stats = useMemo(() => {
-    const list = filteredItems;
-    let totPieces = 0, appPieces = 0;
-    let totSteel = 0, appSteel = 0;
+  const stats = useMemo(() => computeStats(filtered), [filtered]);
 
-    list.forEach(i => {
-      totPieces += Number(i.total_pieces) || 0;
-      appPieces += Number(i.applied_pieces) || 0;
-      totSteel += Number(i.total_steel) || 0;
-      appSteel += Number(i.applied_steel) || 0;
-    });
-
-    const piecesProg = totPieces > 0 ? parseFloat(((appPieces / totPieces) * 100).toFixed(2)) : 0;
-    const steelProg = totSteel > 0 ? parseFloat(((appSteel / totSteel) * 100).toFixed(2)) : 0;
-    
-    let overallProg = 0;
-    if (totPieces > 0 && totSteel > 0) {
-      overallProg = parseFloat(((piecesProg + steelProg) / 2).toFixed(2));
-    } else if (totPieces > 0) {
-      overallProg = piecesProg;
-    } else if (totSteel > 0) {
-      overallProg = steelProg;
-    }
-
-    const completedCount = list.filter(i => i.status === 'منجز').length;
-    const inProgressCount = list.filter(i => i.status === 'قيد التنفيذ').length;
-    const remainingCount = list.filter(i => i.status === 'غير مطبق' || i.status === 'متبقي').length;
-
-    return {
-      count: list.length,
-      totPieces,
-      appPieces,
-      remPieces: totPieces - appPieces,
-      piecesProg,
-      totSteel,
-      appSteel,
-      remSteel: totSteel - appSteel,
-      steelProg,
-      overallProg,
-      completedCount,
-      inProgressCount,
-      remainingCount
-    };
-  }, [filteredItems]);
-
-  // Open modal for Create
-  const handleOpenCreate = () => {
+  const openCreate = () => {
     setEditingItem(null);
-    setIsCloneMode(false);
-    setFormData({
-      zone: selectedZone !== 'ALL' ? selectedZone : 'Zone A',
-      item_name: '',
-      total_pieces: '',
-      applied_pieces: '',
-      total_steel: '',
-      applied_steel: '',
-      notes: '',
-      status: 'auto'
-    });
-    setIsModalOpen(true);
+    setIsClone(false);
+    setForm({ ...EMPTY_FORM, zone: zone !== 'all' ? zone : 'Zone A' });
+    setFormOpen(true);
   };
 
-  // Open modal for Edit
-  const handleOpenEdit = (item) => {
+  const openEdit = (item) => {
     setEditingItem(item);
-    setIsCloneMode(false);
-    setFormData({
-      zone: item.zone,
-      item_name: item.item_name,
-      total_pieces: item.total_pieces,
-      applied_pieces: item.applied_pieces,
-      total_steel: item.total_steel,
-      applied_steel: item.applied_steel,
-      notes: item.notes || '',
-      status: item.status || 'auto'
+    setIsClone(false);
+    setForm({
+      zone: item.zone, item_name: item.item_name, total_pieces: item.total_pieces, applied_pieces: item.applied_pieces,
+      total_steel: item.total_steel, applied_steel: item.applied_steel, notes: item.notes || '', status: item.status || 'auto',
     });
-    setIsModalOpen(true);
+    setFormOpen(true);
   };
 
-  // Open modal for Clone / Duplicate
-  const handleClone = (item) => {
-    setEditingItem(null); // Triggers new creation on submit
-    setIsCloneMode(true);
-    setFormData({
+  const openClone = (item) => {
+    setEditingItem(null);
+    setIsClone(true);
+    setForm({
       zone: item.zone,
       item_name: `${item.item_name} (نسخة)`,
       total_pieces: item.total_pieces,
@@ -182,1388 +126,455 @@ export default function MarblexProgress({ user, lang, t }) {
       total_steel: item.total_steel,
       applied_steel: item.applied_steel || 0,
       notes: item.notes ? `${item.notes} [مستنسخ]` : '',
-      status: item.status || 'auto'
+      status: item.status || 'auto',
     });
-    setIsModalOpen(true);
+    setFormOpen(true);
   };
 
-  // Save (Create or Update)
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.item_name.trim()) return;
-
+  const submit = async (payloadForm) => {
     setSaving(true);
     try {
       const payload = {
-        zone: formData.zone,
-        item_name: formData.item_name.trim(),
-        total_pieces: parseInt(formData.total_pieces, 10) || 0,
-        applied_pieces: parseInt(formData.applied_pieces, 10) || 0,
-        total_steel: parseInt(formData.total_steel, 10) || 0,
-        applied_steel: parseInt(formData.applied_steel, 10) || 0,
-        notes: formData.notes.trim(),
-        status: formData.status === 'auto' ? undefined : formData.status,
-        userName: user?.name || 'المهندس المقيم'
+        zone: payloadForm.zone,
+        item_name: payloadForm.item_name.trim(),
+        total_pieces: parseInt(payloadForm.total_pieces, 10) || 0,
+        applied_pieces: parseInt(payloadForm.applied_pieces, 10) || 0,
+        total_steel: parseInt(payloadForm.total_steel, 10) || 0,
+        applied_steel: parseInt(payloadForm.applied_steel, 10) || 0,
+        notes: payloadForm.notes.trim(),
+        status: payloadForm.status === 'auto' ? undefined : payloadForm.status,
       };
-
       if (editingItem) {
-        // PUT
-        const res = await apiFetch(`/api/marblex/${editingItem.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error(isAr ? 'فشل تعديل السجل.' : 'Failed to update record.');
+        const res = await apiFetch(`/api/marblex/${editingItem.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error(await apiErrorMessage(res, isAr ? 'تعذر حفظ التعديل.' : 'Could not save changes.'));
         const updated = await res.json();
-        setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+        setItems(prev => prev.map(i => (i.id === updated.id ? updated : i)));
+        toast.success(isAr ? 'تم حفظ المقطع' : 'Section saved');
       } else {
-        // POST
-        const res = await apiFetch('/api/marblex', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error(isAr ? 'فشل إضافة السجل.' : 'Failed to create record.');
+        const res = await apiFetch('/api/marblex', { method: 'POST', body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error(await apiErrorMessage(res, isAr ? 'تعذر إضافة المقطع.' : 'Could not add the section.'));
         const created = await res.json();
         setItems(prev => [...prev, created]);
+        toast.success(isAr ? 'تمت إضافة المقطع' : 'Section added');
       }
-
-      setIsModalOpen(false);
+      setFormOpen(false);
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
   };
 
-  // Confirm and Execute Delete (In-App Modal)
   const confirmDelete = async () => {
-    if (!itemToDelete) return;
-    const { id } = itemToDelete;
-    setDeletingId(id);
+    if (!toDelete) return;
     try {
-      const res = await apiFetch(`/api/marblex/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(isAr ? 'فشل حذف السجل.' : 'Failed to delete record.');
-      setItems(prev => prev.filter(i => i.id !== id));
-      setItemToDelete(null);
-      if (isModalOpen && editingItem?.id === id) {
-        setIsModalOpen(false);
-      }
+      const res = await apiFetch(`/api/marblex/${toDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, isAr ? 'تعذر حذف المقطع.' : 'Could not delete the section.'));
+      setItems(prev => prev.filter(i => i.id !== toDelete.id));
+      if (formOpen && editingItem?.id === toDelete.id) setFormOpen(false);
+      toast.success(isAr ? 'تم حذف المقطع' : 'Section deleted');
+      setToDelete(null);
     } catch (err) {
-      alert(err.message);
-    } finally {
-      setDeletingId(null);
+      toast.error(err.message);
     }
   };
 
-  // Printable PDF Generator
-  const handleExportPDF = () => {
-    const activeZoneLabel = zonesList.find(z => z.id === selectedZone)?.label || selectedZone;
-    const activeStatusLabel = statusList.find(s => s.id === selectedStatus)?.label || selectedStatus;
+  const printReport = () => openReport(buildMarblexReport({ list: filtered, stats, zone, status, user, lang }), {
+    title: isAr ? 'تقرير تقدم أعمال الماربلكس' : 'Marblex progress report',
+    orientation: 'landscape',
+  });
 
-    const rowsHTML = filteredItems.map((item, idx) => {
-      const statusBg = item.status === 'منجز' ? '#dcfce7' : item.status === 'قيد التنفيذ' ? '#fef3c7' : '#fee2e2';
-      const statusColor = item.status === 'منجز' ? '#166534' : item.status === 'قيد التنفيذ' ? '#92400e' : '#991b1b';
-
-      return `
-        <tr>
-          <td style="text-align:center;font-weight:bold;">${idx + 1}</td>
-          <td style="font-weight:bold;color:#0f172a;">${item.item_name}</td>
-          <td style="text-align:center;"><span class="zone-badge">${item.zone}</span></td>
-          <td style="text-align:center;">${item.total_pieces}</td>
-          <td style="text-align:center;font-weight:bold;color:#059669;">${item.applied_pieces}</td>
-          <td style="text-align:center;font-weight:bold;direction:ltr;">${item.pieces_progress || 0}%</td>
-          <td style="text-align:center;">${item.total_steel}</td>
-          <td style="text-align:center;font-weight:bold;color:#d97706;">${item.applied_steel}</td>
-          <td style="text-align:center;font-weight:bold;direction:ltr;">${item.steel_progress || 0}%</td>
-          <td style="text-align:center;font-weight:800;direction:ltr;background:#f8fafc;">${item.overall_progress || 0}%</td>
-          <td style="text-align:center;">
-            <span style="background:${statusBg};color:${statusColor};padding:4px 8px;border-radius:4px;font-size:12px;font-weight:bold;">
-              ${item.status}
-            </span>
-          </td>
-          <td style="font-size:12px;color:#475569;">${item.notes || '-'}</td>
-        </tr>
-      `;
-    }).join('');
-
-    const htmlContent = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <title>تقرير تقدم أعمال الماربلكس - ${activeZoneLabel}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    @page { size: A4 landscape; margin: 15mm 12mm 15mm 12mm; }
-    * { box-sizing: border-box; }
-    body { font-family: 'Cairo', sans-serif; margin: 0; padding: 15px; color: #0f172a; background: #fff; font-size: 13px; }
-    
-    .report-header { border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-    .header-title h1 { margin: 0 0 4px 0; font-size: 20px; color: #0f172a; font-weight: 800; }
-    .header-title h2 { margin: 0; font-size: 14px; color: #059669; font-weight: 700; }
-    .header-meta { text-align: left; font-size: 11px; color: #475569; }
-    
-    .filter-tags { display: flex; gap: 10px; margin-bottom: 15px; }
-    .filter-tag { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 12px; }
-
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
-    .kpi-box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
-    .kpi-label { font-size: 11px; color: #64748b; margin-bottom: 4px; font-weight: 600; }
-    .kpi-value { font-size: 18px; font-weight: 800; color: #0f172a; }
-    .kpi-sub { font-size: 11px; color: #059669; font-weight: 700; margin-top: 2px; }
-
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
-    th, td { border: 1px solid #cbd5e1; padding: 7px 8px; text-align: right; vertical-align: middle; }
-    th { background-color: #0f172a; color: #ffffff; font-weight: 700; text-align: center; }
-    tr:nth-child(even) { background-color: #f8fafc; }
-    .zone-badge { background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
-
-    .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 30px; page-break-inside: avoid; }
-    .sig-box { border-top: 1px dashed #94a3b8; padding-top: 10px; text-align: center; }
-    .sig-title { font-weight: 700; color: #0f172a; margin-bottom: 25px; }
-    .sig-line { font-size: 11px; color: #64748b; }
-
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .no-print { display: none; }
-    }
-  </style>
-</head>
-<body>
-  <div class="report-header">
-    <div class="header-title">
-      <h1>مشروع النصب التذكاري للجندي المجهول</h1>
-      <h2>تقرير تقدم أعمال الماربلكس وستيلات التثبيت (Marblex Progress)</h2>
-    </div>
-    <div class="header-meta">
-      <div><strong>تاريخ الإصدار:</strong> ${new Date().toLocaleDateString('ar-IQ')} ${new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</div>
-      <div><strong>المهندس المسؤول:</strong> ${user?.name || 'المهندس المقيم'}</div>
-    </div>
-  </div>
-
-  <div class="filter-tags">
-    <div class="filter-tag"><strong>الزون:</strong> ${activeZoneLabel}</div>
-    <div class="filter-tag"><strong>الحالة:</strong> ${activeStatusLabel}</div>
-    <div class="filter-tag"><strong>عدد المقاطع:</strong> ${filteredItems.length} مقطع</div>
-  </div>
-
-  <div class="kpi-grid">
-    <div class="kpi-box">
-      <div class="kpi-label">إجمالي القطع المطبقة</div>
-      <div class="kpi-value">${stats.appPieces} <span style="font-size:12px;font-weight:normal;color:#64748b;">/ ${stats.totPieces}</span></div>
-      <div class="kpi-sub">نسبة إنجاز القطع: ${stats.piecesProg}%</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-label">إجمالي الستيلات المطبقة</div>
-      <div class="kpi-value">${stats.appSteel} <span style="font-size:12px;font-weight:normal;color:#64748b;">/ ${stats.totSteel}</span></div>
-      <div class="kpi-sub" style="color:#d97706;">نسبة إنجاز الستيلات: ${stats.steelProg}%</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-label">النسبة الكلية للماربلكس</div>
-      <div class="kpi-value" style="color:#2563eb;">${stats.overallProg}%</div>
-      <div class="kpi-sub" style="color:#475569;">المتوسط التراكمي للزون</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-label">حالة المقاطع</div>
-      <div class="kpi-value" style="font-size:15px;">منجز: ${stats.completedCount} | قيد العمل: ${stats.inProgressCount}</div>
-      <div class="kpi-sub" style="color:#dc2626;">المتبقي / غير مطبق: ${stats.remainingCount}</div>
-    </div>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 35px;">#</th>
-        <th>المقطع / الجدار</th>
-        <th style="width: 75px;">الزون</th>
-        <th style="width: 75px;">القطع الكلية</th>
-        <th style="width: 75px;">القطع المطبقة</th>
-        <th style="width: 75px;">إنجاز القطع</th>
-        <th style="width: 75px;">الستيل الكلي</th>
-        <th style="width: 75px;">الستيل المطبق</th>
-        <th style="width: 75px;">إنجاز الستيل</th>
-        <th style="width: 80px;">النسبة الكلية</th>
-        <th style="width: 95px;">الحالة</th>
-        <th>الملاحظات</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rowsHTML || '<tr><td colspan="12" style="text-align:center;padding:20px;color:#94a3b8;">لا توجد سجلات تطابق الفلتر المختار</td></tr>'}
-    </tbody>
-    <tfoot>
-      <tr style="background:#0f172a;color:#ffffff;font-weight:bold;">
-        <td colspan="3" style="text-align:center;padding:9px;font-weight:800;font-size:13px;">المجموع الإجمالي / نسبة الإنجاز الكلية:</td>
-        <td style="text-align:center;padding:9px;">${stats.totPieces}</td>
-        <td style="text-align:center;padding:9px;color:#34d399;">${stats.appPieces}</td>
-        <td style="text-align:center;padding:9px;color:#34d399;direction:ltr;">${stats.piecesProg}%</td>
-        <td style="text-align:center;padding:9px;">${stats.totSteel}</td>
-        <td style="text-align:center;padding:9px;color:#fbbf24;">${stats.appSteel}</td>
-        <td style="text-align:center;padding:9px;color:#fbbf24;direction:ltr;">${stats.steelProg}%</td>
-        <td style="text-align:center;padding:9px;background:#1e293b;color:#38bdf8;font-size:14px;font-weight:900;direction:ltr;">${stats.overallProg}%</td>
-        <td style="text-align:center;padding:9px;font-size:11px;">منجز: ${stats.completedCount} | قيد العمل: ${stats.inProgressCount}</td>
-        <td style="font-size:11px;color:#cbd5e1;">المحصلة الكلية المعتمدة</td>
-      </tr>
-    </tfoot>
-  </table>
-
-  <div class="signatures">
-    <div class="sig-box">
-      <div class="sig-title">مهندس الموقع الميداني</div>
-      <div class="sig-line">التوقيع: .......................................</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-title">المهندس المقيم</div>
-      <div class="sig-line">التوقيع: .......................................</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-title">دائرة المهندس المقيم / الإشراف</div>
-      <div class="sig-line">التوقيع: .......................................</div>
-    </div>
-  </div>
-
-  <script>
-    window.onload = function() {
-      setTimeout(() => {
-        window.print();
-      }, 400);
-    };
-  </script>
-</body>
-</html>`;
-
-    const printWin = window.open('', '_blank', 'width=1100,height=850');
-    if (printWin) {
-      printWin.document.open();
-      printWin.document.write(htmlContent);
-      printWin.document.close();
-    } else {
-      alert(isAr ? 'يرجى السماح بالنوافذ المنبثقة لطباعة التقرير.' : 'Please allow popups to print report.');
-    }
-  };
+  if (loading && items.length === 0) return <LoadingBlock label={isAr ? 'جارٍ تحميل بيانات الماربلكس' : 'Loading Marblex data'} />;
 
   return (
-    <div className="tab-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* ── Top Header & Actions ─────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <Layers style={{ color: 'var(--accent)' }} size={28} />
-            {isAr ? 'تقدم أعمال الماربلكس وستيلات التثبيت' : 'Marblex & Steel Work Progress'}
-          </h1>
-          <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-            {isAr ? 'متابعة وإدخال كميات ونسب إنجاز قطع الماربلكس وبروفايلات الستيل حسب الزونات (A, B1, B2, C)' : 'Track and record quantities & progress of marblex and steel profiles across zones.'}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <button 
-            onClick={fetchMarblex} 
-            className="btn btn-secondary" 
-            title={isAr ? 'تحديث البيانات' : 'Refresh'}
-            style={{ padding: '0.6rem 0.85rem' }}
-          >
-            <RefreshCw size={17} className={loading ? 'spin-animation' : ''} />
+    <div className="stack">
+      {error && (
+        <div className="alert alert--danger" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div className="alert-body">{error}</div>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={load}>
+            <RefreshCw size={15} aria-hidden="true" />
+            {isAr ? 'إعادة المحاولة' : 'Retry'}
           </button>
-
-          <button 
-            onClick={handleExportPDF} 
-            className="btn btn-secondary" 
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.1rem', fontWeight: '600' }}
-          >
-            <Printer size={18} />
-            <span>{isAr ? 'استخراج PDF' : 'Export PDF'}</span>
-          </button>
-
-          {isAdmin && (
-            <button 
-              onClick={handleOpenCreate} 
-              className="btn btn-primary" 
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.25rem', fontWeight: '700' }}
-            >
-              <Plus size={18} />
-              <span>{isAr ? 'إضافة مقطع جديد' : 'Add Section'}</span>
-            </button>
-          )}
         </div>
-      </div>
+      )}
 
-      {/* ── Bento KPI Summary Cards ──────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-        {/* Card 1: Marblex Pieces */}
-        <div className="glass-panel" style={{ padding: '1.25rem', borderRadius: 'var(--radius-xl)', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ color: 'var(--muted)', fontSize: '0.85rem', fontWeight: '600' }}>
-                {isAr ? 'القطع المطبقة / الكلية' : 'Applied / Total Pieces'}
-              </span>
-              <div style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--fg)', marginTop: '0.35rem' }}>
-                {stats.appPieces.toLocaleString()}
-                <span style={{ fontSize: '0.95rem', color: 'var(--muted)', fontWeight: '500', marginRight: '0.4rem', marginLeft: '0.4rem' }}>
-                  / {stats.totPieces.toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <div style={{ width: '42px', height: '42px', borderRadius: 'var(--radius-md)', background: 'rgba(5, 150, 105, 0.12)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Layers size={22} />
-            </div>
-          </div>
-          <div style={{ marginTop: '0.85rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: '600', marginBottom: '0.3rem' }}>
-              <span style={{ color: 'var(--accent)' }}>{stats.piecesProg}% {isAr ? 'منجز' : 'Done'}</span>
-              <span style={{ color: 'var(--muted)' }}>{isAr ? 'متبقي:' : 'Rem:'} {stats.remPieces}</span>
-            </div>
-            <div style={{ width: '100%', height: '8px', background: 'var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, stats.piecesProg)}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.4s ease' }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: Steel Profiles */}
-        <div className="glass-panel" style={{ padding: '1.25rem', borderRadius: 'var(--radius-xl)', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ color: 'var(--muted)', fontSize: '0.85rem', fontWeight: '600' }}>
-                {isAr ? 'الستيلات المطبقة / الكلية' : 'Applied / Total Steel'}
-              </span>
-              <div style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--fg)', marginTop: '0.35rem' }}>
-                {stats.appSteel.toLocaleString()}
-                <span style={{ fontSize: '0.95rem', color: 'var(--muted)', fontWeight: '500', marginRight: '0.4rem', marginLeft: '0.4rem' }}>
-                  / {stats.totSteel.toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <div style={{ width: '42px', height: '42px', borderRadius: 'var(--radius-md)', background: 'rgba(217, 119, 6, 0.12)', color: 'var(--warning)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <BarChart2 size={22} />
-            </div>
-          </div>
-          <div style={{ marginTop: '0.85rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: '600', marginBottom: '0.3rem' }}>
-              <span style={{ color: 'var(--warning)' }}>{stats.steelProg}% {isAr ? 'منجز' : 'Done'}</span>
-              <span style={{ color: 'var(--muted)' }}>{isAr ? 'متبقي:' : 'Rem:'} {stats.remSteel}</span>
-            </div>
-            <div style={{ width: '100%', height: '8px', background: 'var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, stats.steelProg)}%`, height: '100%', background: 'var(--warning)', transition: 'width 0.4s ease' }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Overall Combined Progress */}
-        <div className="glass-panel" style={{ padding: '1.25rem', borderRadius: 'var(--radius-xl)', background: 'linear-gradient(135deg, rgba(5,150,105,0.08) 0%, rgba(37,99,235,0.06) 100%)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <span style={{ color: 'var(--muted)', fontSize: '0.85rem', fontWeight: '600' }}>
-                {isAr ? 'نسبة الإنجاز الكلية لأعمال الماربلكس' : 'Overall Marblex Progress'}
-              </span>
-              <div style={{ fontSize: '2.1rem', fontWeight: '900', color: 'var(--accent)', marginTop: '0.25rem', letterSpacing: '-0.5px' }}>
-                {stats.overallProg}%
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.2rem' }}>
-              <span className="badge badge-success" style={{ padding: '0.3rem 0.65rem' }}>
-                {stats.completedCount} {isAr ? 'مقطع مكتمل' : 'Completed'}
-              </span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-                {isAr ? 'من أصل' : 'out of'} {stats.count} {isAr ? 'مقاطع' : 'sections'}
-              </span>
-            </div>
-          </div>
-          <div style={{ marginTop: '0.85rem' }}>
-            <div style={{ width: '100%', height: '8px', background: 'var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, stats.overallProg)}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent) 0%, #2563eb 100%)', transition: 'width 0.5s ease' }} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Filters & Search Toolbar ─────────────────────────────── */}
-      <div className="glass-panel" style={{ padding: '1rem', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        {/* Row 1: Zone Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--muted)', marginLeft: isAr ? '0.5rem' : '0', marginRight: isAr ? '0' : '0.5rem' }}>
-            {isAr ? 'الزونات:' : 'Zones:'}
-          </span>
-          {zonesList.map(z => (
-            <button
-              key={z.id}
-              onClick={() => setSelectedZone(z.id)}
-              className={`filter-btn ${selectedZone === z.id ? 'active' : ''}`}
-              style={{
-                padding: '0.35rem 0.85rem',
-                borderRadius: 'var(--radius-full)',
-                fontSize: '0.85rem',
-                fontWeight: '600',
-                border: '1px solid var(--border)',
-                background: selectedZone === z.id ? 'var(--accent)' : 'var(--surface-warm)',
-                color: selectedZone === z.id ? '#ffffff' : 'var(--fg)',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              {z.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Row 2: Status Pills + Search */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--muted)', marginLeft: isAr ? '0.5rem' : '0', marginRight: isAr ? '0' : '0.5rem' }}>
-              {isAr ? 'الحالة:' : 'Status:'}
+      <section className="stat-grid stat-grid--bento" aria-label={isAr ? 'ملخص الماربلكس' : 'Marblex summary'}>
+        <StatCard
+          hero
+          label={isAr ? 'نسبة الإنجاز الكلية للماربلكس' : 'Overall Marblex completion'}
+          value={pct(stats.overallProg, 2)}
+          icon={Award}
+          tone="accent"
+          progress={stats.overallProg}
+          meta={
+            <span className="dash-counts">
+              <span>{isAr ? 'منجز' : 'Done'} <strong className="num">{stats.completedCount}</strong></span>
+              <span>{isAr ? 'قيد التنفيذ' : 'Active'} <strong className="num">{stats.inProgressCount}</strong></span>
+              <span>{isAr ? 'غير مطبق' : 'Not applied'} <strong className="num">{stats.remainingCount}</strong></span>
+              <span>{isAr ? 'من' : 'of'} <strong className="num">{stats.count}</strong> {isAr ? 'مقطع' : 'sections'}</span>
             </span>
-            {statusList.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setSelectedStatus(s.id)}
-                style={{
-                  padding: '0.35rem 0.85rem',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: '0.82rem',
-                  fontWeight: '600',
-                  border: '1px solid var(--border)',
-                  background: selectedStatus === s.id ? 'var(--fg)' : 'var(--surface-warm)',
-                  color: selectedStatus === s.id ? 'var(--bg-1)' : 'var(--fg)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          }
+        />
+        <StatCard
+          className="stat--span2"
+          label={isAr ? 'القطع المطبقة / الكلية' : 'Panels applied / total'}
+          value={`${num(stats.appPieces)} / ${num(stats.totPieces)}`}
+          icon={Layers}
+          tone="accent"
+          progress={stats.piecesProg}
+          meta={<>{pct(stats.piecesProg)} {isAr ? 'منجز' : 'done'} · {isAr ? 'متبقي' : 'remaining'} <strong className="num">{num(stats.remPieces)}</strong></>}
+        />
+        <StatCard
+          className="stat--span2"
+          label={isAr ? 'الستيلات المطبقة / الكلية' : 'Steel applied / total'}
+          value={`${num(stats.appSteel)} / ${num(stats.totSteel)}`}
+          icon={BarChart2}
+          tone="warn"
+          progress={stats.steelProg}
+          meta={<>{pct(stats.steelProg)} {isAr ? 'منجز' : 'done'} · {isAr ? 'متبقي' : 'remaining'} <strong className="num">{num(stats.remSteel)}</strong></>}
+        />
+      </section>
 
-          {/* View Mode Toggle + Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 320px', justifyContent: isAr ? 'flex-start' : 'flex-end' }}>
-            {/* View Mode Toggle */}
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: 'var(--surface-warm)',
-              padding: '3px',
-              borderRadius: 'var(--radius-pill)',
-              border: '1px solid var(--border)',
-              flexShrink: 0
-            }}>
-              <button
-                type="button"
-                onClick={() => setViewMode('table')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '5px 12px',
-                  borderRadius: 'var(--radius-pill)',
-                  border: 'none',
-                  fontSize: '0.8rem',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  background: viewMode === 'table' ? 'var(--accent)' : 'transparent',
-                  color: viewMode === 'table' ? '#ffffff' : 'var(--muted)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                <Table size={14} />
-                <span>{isAr ? 'جدول' : 'Table'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('cards')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '5px 12px',
-                  borderRadius: 'var(--radius-pill)',
-                  border: 'none',
-                  fontSize: '0.8rem',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  background: viewMode === 'cards' ? 'var(--accent)' : 'transparent',
-                  color: viewMode === 'cards' ? '#ffffff' : 'var(--muted)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                <LayoutGrid size={14} />
-                <span>{isAr ? 'كروت' : 'Cards'}</span>
-              </button>
-            </div>
-
-            {/* Search Input */}
-            <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 180px', maxWidth: '320px' }}>
-              <Search size={16} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', right: isAr ? '12px' : 'auto', left: isAr ? 'auto' : '12px', color: 'var(--muted)' }} />
-              <input 
-                type="text"
-                placeholder={isAr ? 'بحث باسم المقطع أو الملاحظات...' : 'Search section or notes...'}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-field"
-                style={{
-                  width: '100%',
-                  paddingRight: isAr ? '2.2rem' : '0.85rem',
-                  paddingLeft: isAr ? '0.85rem' : '2.2rem',
-                  paddingTop: '0.45rem',
-                  paddingBottom: '0.45rem',
-                  fontSize: '0.85rem',
-                  borderRadius: 'var(--radius-md)'
-                }}
+      <section className="card">
+        <div className="card-body stack-sm">
+          <div className="toolbar">
+            <div className="input-group toolbar-grow">
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                className="input"
+                placeholder={isAr ? 'ابحث باسم المقطع أو الملاحظات' : 'Search section or notes'}
+                aria-label={isAr ? 'بحث' : 'Search'}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                enterKeyHint="search"
               />
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Main Data Display: Cards View OR Table View ───────────── */}
-      {viewMode === 'cards' ? (
-        <div className="marblex-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '1rem' }}>
-          {loading ? (
-            <div className="glass-panel" style={{ gridColumn: '1 / -1', padding: '3.5rem', textAlign: 'center', borderRadius: 'var(--radius-xl)' }}>
-              <RefreshCw className="spin-animation" size={26} style={{ color: 'var(--accent)', margin: '0 auto 0.65rem auto' }} />
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{isAr ? 'جاري تحميل سجلات الماربلكس...' : 'Loading marblex records...'}</p>
-            </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="glass-panel" style={{ gridColumn: '1 / -1', padding: '3.5rem', textAlign: 'center', borderRadius: 'var(--radius-xl)' }}>
-              <Layers size={36} style={{ margin: '0 auto 0.65rem auto', opacity: 0.4 }} />
-              <p style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--fg)' }}>{isAr ? 'لا توجد سجلات تطابق الفلتر المختار' : 'No records found'}</p>
-              {isAdmin && (
-                <button onClick={handleOpenCreate} className="btn btn-primary" style={{ marginTop: '0.85rem', fontSize: '0.85rem', padding: '0.55rem 1.25rem' }}>
-                  <Plus size={16} style={{ marginLeft: isAr ? '0.35rem' : 0, marginRight: isAr ? 0 : '0.35rem' }} />
-                  {isAr ? 'إضافة مقطع جديد' : 'Add Section'}
+            <div className="toolbar-end">
+              <button type="button" className="btn btn--secondary" onClick={printReport}>
+                <Printer size={18} aria-hidden="true" />
+                {isAr ? 'تقرير PDF' : 'PDF report'}
+              </button>
+              {editable && (
+                <button type="button" className="btn btn--primary" onClick={openCreate}>
+                  <Plus size={18} aria-hidden="true" />
+                  {isAr ? 'إضافة مقطع' : 'Add section'}
                 </button>
               )}
             </div>
-          ) : (
-            filteredItems.map((item, index) => {
-              const statusColor = item.status === 'منجز' ? 'badge-success' : item.status === 'قيد التنفيذ' ? 'badge-warning' : 'badge-danger';
-              const isDone = (item.overall_progress || 0) >= 100;
-              return (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass-panel marblex-touch-card"
-                  style={{
-                    padding: '1.2rem',
-                    borderRadius: 'var(--radius-xl)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '0.85rem',
-                    border: isDone ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border)',
-                    boxShadow: 'var(--shadow-sm)',
-                    position: 'relative'
-                  }}
-                >
-                  {/* Card Top */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--muted)', background: 'var(--surface-warm)', padding: '2px 7px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--border)' }}>
-                          #{index + 1}
-                        </span>
-                        <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', fontWeight: '800', fontSize: '0.75rem' }}>
-                          {item.zone}
-                        </span>
-                        <span className={`badge ${statusColor}`} style={{ fontSize: '0.72rem' }}>
-                          {item.status}
-                        </span>
-                      </div>
-
-                      <div style={{
-                        padding: '0.35rem 0.75rem',
-                        borderRadius: 'var(--radius-pill)',
-                        background: isDone ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.12)',
-                        color: isDone ? 'var(--success)' : 'var(--accent)',
-                        fontWeight: '900',
-                        fontSize: '1rem',
-                        direction: 'ltr'
-                      }}>
-                        {item.overall_progress || 0}%
-                      </div>
-                    </div>
-
-                    <h3 style={{ fontSize: '1.05rem', fontWeight: '800', color: 'var(--fg)', margin: '0.45rem 0 0 0', lineHeight: 1.3 }}>
-                      {item.item_name}
-                    </h3>
-                  </div>
-
-                  {/* Dual Metrics (Pieces + Steel) */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', background: 'var(--surface-warm)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)' }}>
-                    {/* Pieces */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>
-                        <span>{isAr ? 'القطع' : 'Pieces'}</span>
-                        <span style={{ fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>{item.pieces_progress || 0}%</span>
-                      </div>
-                      <div style={{ fontWeight: '800', fontSize: '0.95rem', color: 'var(--fg)' }}>
-                        <span style={{ color: 'var(--accent)' }}>{item.applied_pieces}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 'normal' }}> / {item.total_pieces}</span>
-                      </div>
-                      <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
-                        <div style={{ width: `${Math.min(100, item.pieces_progress || 0)}%`, height: '100%', background: 'var(--accent)' }} />
-                      </div>
-                    </div>
-
-                    {/* Steel */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>
-                        <span>{isAr ? 'الستيل' : 'Steel'}</span>
-                        <span style={{ fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>{item.steel_progress || 0}%</span>
-                      </div>
-                      <div style={{ fontWeight: '800', fontSize: '0.95rem', color: 'var(--fg)' }}>
-                        <span style={{ color: 'var(--warning)' }}>{item.applied_steel}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 'normal' }}> / {item.total_steel}</span>
-                      </div>
-                      <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
-                        <div style={{ width: `${Math.min(100, item.steel_progress || 0)}%`, height: '100%', background: 'var(--warning)' }} />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Notes text */}
-                  {item.notes && (
-                    <div style={{ fontSize: '0.8rem', color: 'var(--muted)', background: 'rgba(0,0,0,0.02)', padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>•</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.notes}</span>
-                    </div>
-                  )}
-
-                  {/* Mobile Actions with 44px touch targets */}
-                  {isAdmin && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', borderTop: '1px solid var(--border)', paddingTop: '0.65rem' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEdit(item)}
-                        className="btn btn-secondary"
-                        style={{ flex: 1, padding: '0.55rem', minHeight: '40px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', color: 'var(--accent)', fontWeight: '700' }}
-                      >
-                        <Edit3 size={15} />
-                        <span>{isAr ? 'تعديل' : 'Edit'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleClone(item)}
-                        className="btn btn-secondary"
-                        style={{ flex: 1, padding: '0.55rem', minHeight: '40px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', color: '#10b981', fontWeight: '700' }}
-                      >
-                        <Copy size={15} />
-                        <span>{isAr ? 'نسخ' : 'Clone'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setItemToDelete(item)}
-                        className="btn btn-secondary"
-                        disabled={deletingId === item.id}
-                        style={{ padding: '0.55rem 0.85rem', minHeight: '40px', color: 'var(--danger)' }}
-                        title={isAr ? 'حذف' : 'Delete'}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              );
-            })
-          )}
+          </div>
+          <Chips
+            label={isAr ? 'تصفية حسب الزون' : 'Filter by zone'}
+            value={zone}
+            onChange={setZone}
+            options={[
+              { value: 'all', label: isAr ? 'كل الزونات' : 'All zones', count: items.length },
+              ...ZONES.map(z => ({ value: z, label: z, count: items.filter(i => i.zone === z).length })),
+            ]}
+          />
+          <Chips
+            label={isAr ? 'تصفية حسب الحالة' : 'Filter by status'}
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: 'all', label: isAr ? 'كل الحالات' : 'All statuses' },
+              { value: DONE, label: statusLabel(DONE, isAr) },
+              { value: ACTIVE, label: statusLabel(ACTIVE, isAr) },
+              { value: NOT_APPLIED, label: statusLabel(NOT_APPLIED, isAr) },
+            ]}
+          />
         </div>
-      ) : (
-        /* ── Main Data Table ──────────────────────────────────────── */
-        <div className="table-responsive glass-panel" style={{ borderRadius: 'var(--radius-xl)', overflowX: 'auto' }}>
-          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: isAr ? 'right' : 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--surface-warm)', borderBottom: '1px solid var(--border)' }}>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>#</th>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'المقطع / الجدار' : 'Section Name'}</th>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'الزون' : 'Zone'}</th>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'القطع المطبقة' : 'Pieces'}</th>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'إنجاز القطع' : 'Pieces %'}</th>
-                <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الستيل المطبق' : 'Steel'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'إنجاز الستيل' : 'Steel %'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'النسبة الكلية' : 'Overall'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الحالة' : 'Status'}</th>
-              <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>{isAr ? 'الملاحظات' : 'Notes'}</th>
-              {isAdmin && <th style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center' }}>{isAr ? 'الإجراءات' : 'Actions'}</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={isAdmin ? 11 : 10} style={{ textAlign: 'center', padding: '3rem' }}>
-                  <RefreshCw className="spin-animation" size={24} style={{ color: 'var(--accent)', margin: '0 auto 0.5rem auto' }} />
-                  <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>{isAr ? 'جاري تحميل سجلات الماربلكس...' : 'Loading...'}</p>
-                </td>
-              </tr>
-            ) : filteredItems.length === 0 ? (
-              <tr>
-                <td colSpan={isAdmin ? 11 : 10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
-                  <Layers size={32} style={{ margin: '0 auto 0.5rem auto', opacity: 0.4 }} />
-                  <p style={{ fontSize: '0.9rem', fontWeight: '600' }}>{isAr ? 'لا توجد سجلات تطابق الفلتر المختار' : 'No records found'}</p>
-                  {isAdmin && (
-                    <button onClick={handleOpenCreate} className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                      <Plus size={15} style={{ marginLeft: '0.35rem' }} />
-                      {isAr ? 'إضافة مقطع جديد' : 'Add Section'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ) : (
-              filteredItems.map((item, index) => {
-                const statusColor = item.status === 'منجز' ? 'badge-success' : item.status === 'قيد التنفيذ' ? 'badge-warning' : 'badge-danger';
-                return (
-                  <tr 
-                    key={item.id} 
-                    onDoubleClick={() => isAdmin && handleOpenEdit(item)}
-                    title={isAdmin ? (isAr ? 'انقر مرتين للتعديل السريع' : 'Double click to edit') : ''}
-                    style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease', cursor: isAdmin ? 'pointer' : 'default' }}
-                  >
-                    <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', fontWeight: '600' }}>
-                      {index + 1}
+      </section>
+
+      <section className="card">
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={items.length === 0 ? Boxes : SearchX}
+            title={items.length === 0 ? (isAr ? 'لا توجد مقاطع بعد' : 'No sections yet') : (isAr ? 'لا توجد نتائج' : 'No matches')}
+            text={items.length === 0
+              ? (isAr ? 'أضف أول مقطع لبدء متابعة ألواح الماربلكس والستيلات.' : 'Add the first section to start tracking panels and steel.')
+              : (isAr ? 'غيّر البحث أو الزون أو الحالة.' : 'Change the search, zone or status.')}
+            action={items.length === 0 && editable && (
+              <button type="button" className="btn btn--primary" onClick={openCreate}>
+                <Plus size={18} aria-hidden="true" />
+                {isAr ? 'إضافة مقطع' : 'Add section'}
+              </button>
+            )}
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="dt dt--stack">
+              <thead>
+                <tr>
+                  <th>{isAr ? 'المقطع / الجدار' : 'Section'}</th>
+                  <th>{isAr ? 'الزون' : 'Zone'}</th>
+                  <th className="c-num">{isAr ? 'القطع' : 'Panels'}</th>
+                  <th className="c-num">{isAr ? 'الستيل' : 'Steel'}</th>
+                  <th style={{ minWidth: '10rem' }}>{isAr ? 'النسبة الكلية' : 'Overall'}</th>
+                  <th>{isAr ? 'الحالة' : 'Status'}</th>
+                  <th>{isAr ? 'الملاحظات' : 'Notes'}</th>
+                  {editable && <th className="c-actions"><span className="sr-only">{isAr ? 'إجراءات' : 'Actions'}</span></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(item => (
+                  <tr key={item.id}>
+                    <td className="c-title">{item.item_name}</td>
+                    <td data-label={isAr ? 'الزون' : 'Zone'}><span className="badge badge--outline">{item.zone}</span></td>
+                    <td className="c-num" data-label={isAr ? 'القطع' : 'Panels'}>
+                      <span className="num"><strong className="text-success">{num(item.applied_pieces)}</strong><span className="muted"> / {num(item.total_pieces)}</span> <small className="muted">({pct(item.pieces_progress || 0)})</small></span>
                     </td>
-                    <td style={{ padding: '0.85rem 1rem', fontWeight: '700', color: 'var(--fg)' }}>
-                      {item.item_name}
+                    <td className="c-num" data-label={isAr ? 'الستيل' : 'Steel'}>
+                      <span className="num"><strong>{num(item.applied_steel)}</strong><span className="muted"> / {num(item.total_steel)}</span> <small className="muted">({pct(item.steel_progress || 0)})</small></span>
                     </td>
-                    <td style={{ padding: '0.85rem 1rem' }}>
-                      <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', fontWeight: '700' }}>
-                        {item.zone}
-                      </span>
+                    <td className="c-sub" data-label={isAr ? 'النسبة الكلية' : 'Overall'}>
+                      <ProgressBar value={item.overall_progress || 0} label={item.item_name} showValue />
                     </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center', fontSize: '0.9rem' }}>
-                      <span style={{ fontWeight: '800', color: 'var(--accent)' }}>{item.applied_pieces}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}> / {item.total_pieces}</span>
+                    <td data-label={isAr ? 'الحالة' : 'Status'}>
+                      <span className={`badge badge--${statusTone(item.status)}`}>{statusLabel(item.status, isAr)}</span>
                     </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center', width: '110px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--fg)', direction: 'ltr' }}>
-                          {item.pieces_progress || 0}%
-                        </span>
-                        <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ width: `${Math.min(100, item.pieces_progress || 0)}%`, height: '100%', background: 'var(--accent)' }} />
-                        </div>
-                      </div>
+                    <td className="c-full c-muted" data-label={isAr ? 'الملاحظات' : 'Notes'}>
+                      {item.notes ? <span className="clamp-2">{item.notes}</span> : null}
                     </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center', fontSize: '0.9rem' }}>
-                      <span style={{ fontWeight: '800', color: 'var(--warning)' }}>{item.applied_steel}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}> / {item.total_steel}</span>
-                    </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center', width: '110px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--fg)', direction: 'ltr' }}>
-                          {item.steel_progress || 0}%
-                        </span>
-                        <div style={{ width: '100%', height: '5px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ width: `${Math.min(100, item.steel_progress || 0)}%`, height: '100%', background: 'var(--warning)' }} />
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>
-                      <span style={{ fontWeight: '900', fontSize: '0.95rem', color: (item.overall_progress || 0) >= 100 ? 'var(--accent)' : 'var(--fg)', direction: 'ltr', display: 'inline-block' }}>
-                        {item.overall_progress || 0}%
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>
-                      <span className={`badge ${statusColor}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.85rem 1rem', fontSize: '0.82rem', color: 'var(--muted)', maxWidth: '200px' }}>
-                      {item.notes || '-'}
-                    </td>
-                    {isAdmin && (
-                      <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
-                          <button
-                            onClick={() => handleOpenEdit(item)}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.55rem', color: 'var(--accent)' }}
-                            title={isAr ? 'تعديل المقطع' : 'Edit'}
-                          >
-                            <Edit3 size={15} />
+                    {editable && (
+                      <td className="c-actions">
+                        <div className="btn-row">
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => openEdit(item)} aria-label={`${isAr ? 'تعديل' : 'Edit'} ${item.item_name}`}>
+                            <Pencil size={15} aria-hidden="true" />
+                            {isAr ? 'تعديل' : 'Edit'}
                           </button>
-                          <button
-                            onClick={() => handleClone(item)}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.55rem', color: '#10b981' }}
-                            title={isAr ? 'نسخ واستنساخ المقطع' : 'Copy / Clone'}
-                          >
-                            <Copy size={15} />
+                          <button type="button" className="btn btn--ghost btn--sm btn--icon" onClick={() => openClone(item)} aria-label={`${isAr ? 'نسخ' : 'Duplicate'} ${item.item_name}`} title={isAr ? 'نسخ' : 'Duplicate'}>
+                            <Copy size={15} aria-hidden="true" />
                           </button>
-                          <button
-                            onClick={() => setItemToDelete(item)}
-                            className="btn btn-secondary"
-                            disabled={deletingId === item.id}
-                            style={{ padding: '0.35rem 0.55rem', color: 'var(--danger)' }}
-                            title={isAr ? 'حذف المقطع' : 'Delete'}
-                          >
-                          <Trash2 size={15} />
+                          <button type="button" className="btn btn--danger-ghost btn--sm btn--icon" onClick={() => setToDelete(item)} aria-label={`${isAr ? 'حذف' : 'Delete'} ${item.item_name}`} title={isAr ? 'حذف' : 'Delete'}>
+                            <Trash2 size={15} aria-hidden="true" />
                           </button>
                         </div>
                       </td>
                     )}
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-          {!loading && filteredItems.length > 0 && (
-            <tfoot style={{
-              background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.95) 100%)',
-              borderTop: '2px solid var(--accent)',
-              boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.15)'
-            }}>
-              <tr style={{ fontWeight: '700' }}>
-                <td style={{ padding: '1rem 0.75rem', textAlign: 'center', color: 'var(--accent)' }}>
-                  <Award size={18} />
-                </td>
-                <td style={{ padding: '1rem', fontSize: '0.95rem', fontWeight: '800', color: 'var(--fg)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span>{isAr ? 'الإجمالي العام للماربلكس:' : 'Overall Total Progress:'}</span>
-                    <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.18)', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: '800' }}>
-                      {filteredItems.length} {isAr ? 'مقاطع' : 'Sections'}
-                    </span>
-                  </div>
-                </td>
-                <td style={{ padding: '1rem' }}>
-                  <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--fg)', fontSize: '0.78rem' }}>
-                    {selectedZone === 'ALL' ? (isAr ? 'جميع الزونات' : 'All Zones') : selectedZone}
-                  </span>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.92rem' }}>
-                  <span style={{ fontWeight: '900', color: 'var(--accent)' }}>{stats.appPieces}</span>
-                  <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}> / {stats.totPieces}</span>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center', width: '110px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>
-                      {stats.piecesProg}%
-                    </span>
-                    <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, stats.piecesProg)}%`, height: '100%', background: 'var(--accent)' }} />
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center', fontSize: '0.92rem' }}>
-                  <span style={{ fontWeight: '900', color: 'var(--warning)' }}>{stats.appSteel}</span>
-                  <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}> / {stats.totSteel}</span>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center', width: '110px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>
-                      {stats.steelProg}%
-                    </span>
-                    <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, stats.steelProg)}%`, height: '100%', background: 'var(--warning)' }} />
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center' }}>
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: 'var(--radius-md)',
-                    background: stats.overallProg >= 100 
-                      ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.35))'
-                      : 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.35))',
-                    border: `1.5px solid ${stats.overallProg >= 100 ? '#10b981' : 'var(--accent)'}`,
-                    boxShadow: '0 2px 10px rgba(99, 102, 241, 0.25)'
-                  }}>
-                    <span style={{
-                      fontWeight: '900',
-                      fontSize: '1.1rem',
-                      color: stats.overallProg >= 100 ? '#10b981' : 'var(--accent)',
-                      direction: 'ltr'
-                    }}>
-                      {stats.overallProg}%
-                    </span>
-                  </div>
-                </td>
-                <td style={{ padding: '1rem', textAlign: 'center' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', alignItems: 'center' }}>
-                    <span className="badge badge-success" style={{ fontSize: '0.72rem', padding: '0.15rem 0.4rem' }}>
-                      {isAr ? `منجز: ${stats.completedCount}` : `Done: ${stats.completedCount}`}
-                    </span>
-                    <span className="badge badge-warning" style={{ fontSize: '0.72rem', padding: '0.15rem 0.4rem' }}>
-                      {isAr ? `قيد العمل: ${stats.inProgressCount}` : `Active: ${stats.inProgressCount}`}
-                    </span>
-                  </div>
-                </td>
-                <td style={{ padding: '1rem', fontSize: '0.82rem', color: 'var(--muted)' }}>
-                  {isAr ? 'المحصلة الإجمالية المعتمدة لجميع المقاطع' : 'Certified grand total for all sections'}
-                </td>
-                {isAdmin && (
-                  <td style={{ padding: '1rem', textAlign: 'center', color: 'var(--muted)' }}>
-                    -
-                  </td>
-                )}
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      )}
-
-      {/* ── Bottom Executive Summary Ribbon ───────────────────────── */}
-      {!loading && filteredItems.length > 0 && (
-        <div style={{
-          marginTop: '1.25rem',
-          padding: '1.15rem 1.5rem',
-          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '1.25rem',
-          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.25)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-            <div style={{
-              width: '46px',
-              height: '46px',
-              borderRadius: 'var(--radius-lg)',
-              background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.4)'
-            }}>
-              <TrendingUp size={24} />
-            </div>
-            <div>
-              <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: 'var(--fg)' }}>
-                {isAr ? 'نسبة الإنجاز الكلية للماربلكس' : 'Overall Marblex Completion'}
-              </h4>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted)' }}>
-                {isAr 
-                  ? `محسوبة تراكمياً من مجموع ${filteredItems.length} مقطع (${stats.appPieces}/${stats.totPieces} قطعة | ${stats.appSteel}/${stats.totSteel} ستيل)`
-                  : `Calculated cumulatively across ${filteredItems.length} sections`}
-              </p>
-            </div>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="c-full">{isAr ? 'المجموع' : 'Total'} <span className="muted text-xs">· <span className="num">{stats.count}</span> {isAr ? 'مقطع' : 'sections'}</span></td>
+                  <td className="c-hide-sm" />
+                  <td className="c-num" data-label={isAr ? 'القطع' : 'Panels'}><span className="num">{num(stats.appPieces)} / {num(stats.totPieces)}</span></td>
+                  <td className="c-num" data-label={isAr ? 'الستيل' : 'Steel'}><span className="num">{num(stats.appSteel)} / {num(stats.totSteel)}</span></td>
+                  <td className="c-full"><ProgressBar value={stats.overallProg} label={isAr ? 'النسبة الكلية' : 'Overall'} showValue decimals={2} /></td>
+                  <td className="c-hide-sm" colSpan={editable ? 3 : 2} />
+                </tr>
+              </tfoot>
+            </table>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' }}>
-            {/* Pieces Summary */}
-            <div style={{ textAlign: isAr ? 'right' : 'left' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: '600' }}>
-                {isAr ? 'إنجاز القطع' : 'Pieces Progress'}
-              </div>
-              <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--accent)', direction: 'ltr' }}>
-                {stats.piecesProg}%
-              </div>
-            </div>
-
-            {/* Steel Summary */}
-            <div style={{ textAlign: isAr ? 'right' : 'left' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: '600' }}>
-                {isAr ? 'إنجاز الستيل' : 'Steel Progress'}
-              </div>
-              <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--warning)', direction: 'ltr' }}>
-                {stats.steelProg}%
-              </div>
-            </div>
-
-            {/* Overall Percentage Badge */}
-            <div style={{
-              padding: '0.65rem 1.4rem',
-              borderRadius: 'var(--radius-lg)',
-              background: stats.overallProg >= 100 
-                ? 'linear-gradient(135deg, #10b981, #059669)'
-                : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              color: '#ffffff',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 16px rgba(99, 102, 241, 0.4)'
-            }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                {isAr ? 'المحصلة النهائية' : 'Grand Total'}
-              </span>
-              <span style={{ fontSize: '1.5rem', fontWeight: '900', direction: 'ltr', lineHeight: 1.1 }}>
-                {stats.overallProg}%
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Add / Edit Modal ─────────────────────────────────────── */}
-      <AnimatePresence>
-        {isModalOpen && (
-          <motion.div
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'rgba(0, 0, 0, 0.65)',
-              backdropFilter: 'blur(5px)',
-              zIndex: 9999,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '1rem'
-            }}
-            onClick={() => !saving && setIsModalOpen(false)}
-          >
-            <motion.div
-              className="glass-panel"
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              style={{
-                background: 'var(--surface-solid)',
-                borderRadius: 'var(--radius-xl)',
-                width: '100%',
-                maxWidth: '560px',
-                padding: '1.75rem',
-                border: '1px solid var(--border)',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.35)',
-                maxHeight: '90vh',
-                overflowY: 'auto'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: '800', color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Layers style={{ color: 'var(--accent)' }} size={22} />
-                  {isCloneMode 
-                    ? (isAr ? 'نسخ واستنساخ مقطع ماربلكس' : 'Duplicate Marblex Section')
-                    : editingItem 
-                      ? (isAr ? 'تعديل مقطع ماربلكس' : 'Edit Marblex Section')
-                      : (isAr ? 'إضافة مقطع ماربلكس جديد' : 'New Marblex Section')
-                  }
-                </h3>
-                <button 
-                  onClick={() => setIsModalOpen(false)} 
-                  disabled={saving}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {/* Zone & Section Name */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-                      {isAr ? 'الزون *' : 'Zone *'}
-                    </label>
-                    <select
-                      className="input-field"
-                      value={formData.zone}
-                      onChange={(e) => setFormData({ ...formData, zone: e.target.value })}
-                      required
-                      style={{ width: '100%', padding: '0.55rem', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)' }}
-                    >
-                      <option value="Zone A">Zone A</option>
-                      <option value="Zone B1">Zone B1</option>
-                      <option value="Zone B2">Zone B2</option>
-                      <option value="Zone C">Zone C</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-                      {isAr ? 'اسم المقطع / الجدار *' : 'Section Name *'}
-                    </label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder={isAr ? 'مثال: جدار الواجهة الرئيسي A-1' : 'e.g. Main Wall Section A-1'}
-                      value={formData.item_name}
-                      onChange={(e) => setFormData({ ...formData, item_name: e.target.value })}
-                      required
-                      style={{ width: '100%', padding: '0.55rem', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)' }}
-                    />
-                  </div>
-                </div>
-
-                {/* Marble Pieces (Total & Applied) */}
-                <div style={{ background: 'var(--surface-warm)', padding: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--accent)', display: 'block', marginBottom: '0.5rem' }}>
-                    {isAr ? 'أعمال قطع الماربلكس' : 'Marblex Pieces'}
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                        {isAr ? 'مجموع القطع المراد تطبيقها' : 'Total Target Pieces'}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-field"
-                        placeholder="0"
-                        value={formData.total_pieces}
-                        onChange={(e) => setFormData({ ...formData, total_pieces: e.target.value })}
-                        required
-                        style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                        {isAr ? 'عدد القطع المطبقة فعلياً' : 'Applied Pieces'}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-field"
-                        placeholder="0"
-                        value={formData.applied_pieces}
-                        onChange={(e) => setFormData({ ...formData, applied_pieces: e.target.value })}
-                        required
-                        style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Steel Profiles (Total & Applied) */}
-                <div style={{ background: 'var(--surface-warm)', padding: '0.85rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--warning)', display: 'block', marginBottom: '0.5rem' }}>
-                    {isAr ? 'أعمال بروفايلات الستيل' : 'Steel Profiles'}
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                        {isAr ? 'مجموع الستيلات المراد تطبيقها' : 'Total Steel'}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-field"
-                        placeholder="0"
-                        value={formData.total_steel}
-                        onChange={(e) => setFormData({ ...formData, total_steel: e.target.value })}
-                        required
-                        style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                        {isAr ? 'عدد الستيلات المطبقة فعلياً' : 'Applied Steel'}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input-field"
-                        placeholder="0"
-                        value={formData.applied_steel}
-                        onChange={(e) => setFormData({ ...formData, applied_steel: e.target.value })}
-                        required
-                        style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Status selection override (optional) */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-                    {isAr ? 'حالة المقطع' : 'Status'}
-                  </label>
-                  <select
-                    className="input-field"
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    style={{ width: '100%', padding: '0.55rem', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)' }}
-                  >
-                    <option value="auto">{isAr ? 'تحديد تلقائي (حسب النسبة المئوية)' : 'Auto calculate'}</option>
-                    <option value="منجز">{isAr ? 'منجز بالكامل' : 'Completed'}</option>
-                    <option value="قيد التنفيذ">{isAr ? 'قيد التنفيذ' : 'In Progress'}</option>
-                    <option value="غير مطبق">{isAr ? 'غير مطبق / متبقي' : 'Remaining'}</option>
-                  </select>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-                    {isAr ? 'ملاحظات هندسية' : 'Notes'}
-                  </label>
-                  <textarea
-                    rows={2}
-                    className="input-field"
-                    placeholder={isAr ? 'ملاحظات فنية أو موضعية...' : 'Site technical notes...'}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    style={{ width: '100%', padding: '0.55rem', borderRadius: 'var(--radius-md)', resize: 'vertical' }}
-                  />
-                </div>
-
-                {/* Live Real-Time Calculation Preview */}
-                {(() => {
-                  const liveTotP = Math.max(0, parseInt(formData.total_pieces, 10) || 0);
-                  const liveAppP = Math.min(liveTotP, Math.max(0, parseInt(formData.applied_pieces, 10) || 0));
-                  const livePiecesProg = liveTotP > 0 ? parseFloat(((liveAppP / liveTotP) * 100).toFixed(1)) : 0;
-
-                  const liveTotS = Math.max(0, parseInt(formData.total_steel, 10) || 0);
-                  const liveAppS = Math.min(liveTotS, Math.max(0, parseInt(formData.applied_steel, 10) || 0));
-                  const liveSteelProg = liveTotS > 0 ? parseFloat(((liveAppS / liveTotS) * 100).toFixed(1)) : 0;
-
-                  const liveOverallProg = parseFloat(((livePiecesProg + liveSteelProg) / 2).toFixed(1));
-
-                  return (
-                    <div style={{ background: 'var(--surface-warm)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'block', fontWeight: '600' }}>
-                          {isAr ? 'النسبة الكلية المحسوبة فورياً:' : 'Auto Calculated Progress:'}
-                        </span>
-                        <span style={{ fontSize: '1.35rem', fontWeight: '900', color: liveOverallProg >= 100 ? 'var(--success)' : 'var(--accent)' }}>
-                          {liveOverallProg}%
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.85rem', fontSize: '0.82rem', fontWeight: '700' }}>
-                        <span style={{ color: 'var(--accent)' }}>
-                          {isAr ? 'إنجاز القطع:' : 'Pieces:'} {livePiecesProg}%
-                        </span>
-                        <span style={{ color: 'var(--warning)' }}>
-                          {isAr ? 'إنجاز الستيل:' : 'Steel:'} {liveSteelProg}%
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Actions */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {editingItem && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setItemToDelete(editingItem)}
-                          disabled={saving}
-                          className="btn btn-danger"
-                          style={{ background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
-                          title={isAr ? 'حذف هذا المقطع نهائياً' : 'Delete Section'}
-                        >
-                          <Trash2 size={16} />
-                          <span>{isAr ? 'حذف' : 'Delete'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleClone(editingItem)}
-                          disabled={saving}
-                          className="btn btn-secondary"
-                          style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-md)' }}
-                          title={isAr ? 'استنساخ كعنصر جديد' : 'Duplicate as new'}
-                        >
-                          <Copy size={16} />
-                          <span>{isAr ? 'نسخ واستنساخ' : 'Clone'}</span>
-                        </button>
-                      </>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                    <button
-                      type="button"
-                      onClick={() => setIsModalOpen(false)}
-                      disabled={saving}
-                      className="btn btn-secondary"
-                    >
-                      {isAr ? 'إلغاء' : 'Cancel'}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="btn btn-primary"
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: '700' }}
-                    >
-                      <Save size={16} />
-                      <span>{saving ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isCloneMode ? (isAr ? 'حفظ النسخة' : 'Save Copy') : editingItem ? (isAr ? 'حفظ التعديلات' : 'Save Changes') : (isAr ? 'إضافة المقطع' : 'Add Section'))}</span>
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
         )}
-      </AnimatePresence>
+      </section>
 
-      {/* ── Custom In-App Delete Confirmation Modal ──────────────── */}
-      <AnimatePresence>
-        {itemToDelete && (
-          <motion.div
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.75)',
-              backdropFilter: 'blur(6px)',
-              zIndex: 10001,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '1rem'
-            }}
-            onClick={() => !deletingId && setItemToDelete(null)}
-          >
-            <motion.div
-              className="glass-panel"
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              style={{
-                background: 'var(--surface-solid)',
-                borderRadius: 'var(--radius-xl)',
-                width: '100%',
-                maxWidth: '440px',
-                padding: '2rem 1.75rem',
-                border: '1px solid var(--border)',
-                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
-                textAlign: 'center'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
-                <Trash2 size={28} />
-              </div>
+      <MarblexForm
+        open={formOpen}
+        form={form}
+        setForm={setForm}
+        editing={editingItem}
+        isClone={isClone}
+        saving={saving}
+        lang={lang}
+        onClose={() => !saving && setFormOpen(false)}
+        onSubmit={submit}
+        onDelete={editingItem ? () => setToDelete(editingItem) : undefined}
+      />
 
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--fg)', marginBottom: '0.5rem' }}>
-                {isAr ? 'تأكيد حذف مقطع الماربلكس' : 'Confirm Section Deletion'}
-              </h3>
-              
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.6' }}>
-                {isAr 
-                  ? `هل أنت متأكد من رغبتك في حذف المقطع "${itemToDelete.item_name}" التابع لـ (${itemToDelete.zone})؟ سيتم حذفه نهائياً من النظام.`
-                  : `Are you sure you want to delete section "${itemToDelete.item_name}" in (${itemToDelete.zone})? It will be permanently removed.`}
-              </p>
-
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => setItemToDelete(null)}
-                  disabled={Boolean(deletingId)}
-                  className="btn btn-secondary"
-                  style={{ flex: 1, padding: '0.65rem', fontWeight: '600' }}
-                >
-                  {isAr ? 'إلغاء' : 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmDelete}
-                  disabled={Boolean(deletingId)}
-                  className="btn btn-danger"
-                  style={{ flex: 1, padding: '0.65rem', fontWeight: '700', background: 'var(--danger)', color: '#fff' }}
-                >
-                  {deletingId ? (isAr ? 'جاري الحذف...' : 'Deleting...') : (isAr ? 'نعم، احذف' : 'Yes, Delete')}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ConfirmDialog
+        open={Boolean(toDelete)}
+        lang={lang}
+        title={isAr ? 'حذف المقطع' : 'Delete section'}
+        message={isAr ? `سيُحذف "${toDelete?.item_name}" نهائياً ولا يمكن التراجع عن ذلك.` : `"${toDelete?.item_name}" will be deleted permanently. This cannot be undone.`}
+        confirmLabel={isAr ? 'حذف' : 'Delete'}
+        onConfirm={confirmDelete}
+        onClose={() => setToDelete(null)}
+      />
     </div>
   );
+}
+
+function MarblexForm({ open, form, setForm, editing, isClone, saving, lang, onClose, onSubmit, onDelete }) {
+  const isAr = lang === 'ar';
+  const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
+
+  const totP = parseInt(form.total_pieces, 10) || 0;
+  const appP = parseInt(form.applied_pieces, 10) || 0;
+  const totS = parseInt(form.total_steel, 10) || 0;
+  const appS = parseInt(form.applied_steel, 10) || 0;
+  const piecesErr = totP > 0 && appP > totP;
+  const steelErr = totS > 0 && appS > totS;
+  const preview = computeStats([{ total_pieces: totP, applied_pieces: appP, total_steel: totS, applied_steel: appS }]).overallProg;
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.item_name.trim() || piecesErr || steelErr) return;
+    onSubmit(form);
+  };
+
+  const title = editing
+    ? (isAr ? 'تعديل المقطع' : 'Edit section')
+    : isClone ? (isAr ? 'نسخ مقطع' : 'Duplicate section') : (isAr ? 'إضافة مقطع جديد' : 'Add section');
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      description={isClone ? (isAr ? 'نسخة جديدة من مقطع قائم. عدّل ما يلزم ثم احفظ.' : 'A new copy of an existing section. Adjust and save.') : undefined}
+      size="lg"
+      closeLabel={isAr ? 'إغلاق' : 'Close'}
+      footer={
+        <>
+          {onDelete && (
+            <button type="button" className="btn btn--danger-ghost" onClick={onDelete} style={{ marginInlineEnd: 'auto' }} disabled={saving}>
+              <Trash2 size={17} aria-hidden="true" />
+              {isAr ? 'حذف' : 'Delete'}
+            </button>
+          )}
+          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={saving}>{isAr ? 'إلغاء' : 'Cancel'}</button>
+          <button type="submit" form="marblex-form" className="btn btn--primary" aria-busy={saving}>
+            <Save size={18} aria-hidden="true" />
+            {isAr ? 'حفظ' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <form id="marblex-form" className="stack-sm" onSubmit={submit} noValidate>
+        <div className="form-grid">
+          <Field label={isAr ? 'اسم المقطع / الجدار' : 'Section name'} htmlFor="mbx-name" className="span-all">
+            <input id="mbx-name" className="input" value={form.item_name} onChange={set('item_name')} required data-autofocus
+              aria-invalid={!form.item_name.trim() && form.item_name !== '' ? 'true' : undefined} />
+          </Field>
+          <Field label={isAr ? 'الزون' : 'Zone'} htmlFor="mbx-zone">
+            <select id="mbx-zone" className="select" value={form.zone} onChange={set('zone')}>
+              {ZONES.map(z => <option key={z} value={z}>{z}</option>)}
+            </select>
+          </Field>
+          <Field label={isAr ? 'الحالة' : 'Status'} htmlFor="mbx-status" hint={form.status === 'auto' ? (isAr ? 'تُحسب من نسبة الإنجاز' : 'Derived from completion') : undefined}>
+            <select id="mbx-status" className="select" value={form.status} onChange={set('status')}>
+              <option value="auto">{isAr ? 'تلقائي حسب النسبة' : 'Automatic'}</option>
+              <option value={DONE}>{statusLabel(DONE, isAr)}</option>
+              <option value={ACTIVE}>{statusLabel(ACTIVE, isAr)}</option>
+              <option value={NOT_APPLIED}>{statusLabel(NOT_APPLIED, isAr)}</option>
+            </select>
+          </Field>
+        </div>
+
+        <fieldset className="form-section">
+          <legend className="form-section-title">{isAr ? 'ألواح الماربلكس (قطعة)' : 'Marblex panels (pcs)'}</legend>
+          <div className="form-grid form-grid--tight">
+            <Field label={isAr ? 'الكلي' : 'Total'} htmlFor="mbx-tp">
+              <input id="mbx-tp" className="input input--num" type="number" inputMode="numeric" min="0" value={form.total_pieces} onChange={set('total_pieces')} />
+            </Field>
+            <Field label={isAr ? 'المطبق' : 'Applied'} htmlFor="mbx-ap" error={piecesErr ? (isAr ? 'أكبر من الكلي' : 'More than total') : undefined}>
+              <input id="mbx-ap" className="input input--num" type="number" inputMode="numeric" min="0" value={form.applied_pieces} onChange={set('applied_pieces')} aria-invalid={piecesErr || undefined} />
+            </Field>
+          </div>
+        </fieldset>
+
+        <fieldset className="form-section">
+          <legend className="form-section-title">{isAr ? 'ستيلات التثبيت' : 'Fixing steel'}</legend>
+          <div className="form-grid form-grid--tight">
+            <Field label={isAr ? 'الكلي' : 'Total'} htmlFor="mbx-ts">
+              <input id="mbx-ts" className="input input--num" type="number" inputMode="numeric" min="0" value={form.total_steel} onChange={set('total_steel')} />
+            </Field>
+            <Field label={isAr ? 'المطبق' : 'Applied'} htmlFor="mbx-as" error={steelErr ? (isAr ? 'أكبر من الكلي' : 'More than total') : undefined}>
+              <input id="mbx-as" className="input input--num" type="number" inputMode="numeric" min="0" value={form.applied_steel} onChange={set('applied_steel')} aria-invalid={steelErr || undefined} />
+            </Field>
+          </div>
+        </fieldset>
+
+        <div>
+          <div className="kv-label" style={{ marginBlockEnd: 'var(--space-2)' }}>{isAr ? 'النسبة الكلية بعد الحفظ' : 'Overall after saving'}</div>
+          <ProgressBar value={preview} label={isAr ? 'النسبة الكلية' : 'Overall'} showValue decimals={2} />
+        </div>
+
+        <Field label={isAr ? 'الملاحظات' : 'Notes'} htmlFor="mbx-notes">
+          <textarea id="mbx-notes" className="textarea" rows={3} value={form.notes} onChange={set('notes')} />
+        </Field>
+      </form>
+    </Modal>
+  );
+}
+
+// ── PDF ───────────────────────────────────────────────────────────────────
+
+function buildMarblexReport({ list, stats, zone, status, user, lang }) {
+  const isAr = lang === 'ar';
+  const zoneText = zone === 'all' ? (isAr ? 'جميع الزونات' : 'All zones') : zone;
+  const statusText = status === 'all' ? (isAr ? 'جميع الحالات' : 'All statuses') : statusLabel(status, isAr);
+
+  const body = [
+    h.kpis([
+      { label: isAr ? 'النسبة الكلية' : 'Overall', value: pct(stats.overallProg, 2), tone: 'success', sub: isAr ? 'متوسط القطع والستيل' : 'Panels and steel average' },
+      { label: isAr ? 'القطع المطبقة' : 'Panels applied', value: `${num(stats.appPieces)} / ${num(stats.totPieces)}`, sub: `${pct(stats.piecesProg)}` },
+      { label: isAr ? 'الستيل المطبق' : 'Steel applied', value: `${num(stats.appSteel)} / ${num(stats.totSteel)}`, sub: `${pct(stats.steelProg)}` },
+      { label: isAr ? 'حالة المقاطع' : 'Sections', value: `${stats.completedCount} / ${stats.count}`, sub: isAr ? `قيد التنفيذ ${stats.inProgressCount}، غير مطبق ${stats.remainingCount}` : `${stats.inProgressCount} active, ${stats.remainingCount} not applied` },
+    ]),
+    h.section(isAr ? 'تفاصيل المقاطع' : 'Sections', h.table({
+      columns: [
+        { label: '#', align: 'center', width: '8mm' },
+        { label: isAr ? 'المقطع / الجدار' : 'Section' },
+        { label: isAr ? 'الزون' : 'Zone', align: 'center', width: '18mm' },
+        { label: isAr ? 'القطع الكلية' : 'Panels', align: 'center' },
+        { label: isAr ? 'المطبقة' : 'Applied', align: 'center' },
+        { label: isAr ? 'إنجاز القطع' : 'Panels %', align: 'center' },
+        { label: isAr ? 'الستيل الكلي' : 'Steel', align: 'center' },
+        { label: isAr ? 'المطبق' : 'Applied', align: 'center' },
+        { label: isAr ? 'إنجاز الستيل' : 'Steel %', align: 'center' },
+        { label: isAr ? 'النسبة الكلية' : 'Overall', align: 'center', width: '22mm' },
+        { label: isAr ? 'الحالة' : 'Status', align: 'center' },
+        { label: isAr ? 'الملاحظات' : 'Notes', width: '40mm' },
+      ],
+      rows: list.map((item, i) => ({
+        cls: item.status === DONE ? 'done' : '',
+        cells: [
+          i + 1,
+          { v: item.item_name, strong: true },
+          item.zone,
+          num(item.total_pieces),
+          { v: num(item.applied_pieces), tone: 'success', strong: true },
+          pct(item.pieces_progress || 0),
+          num(item.total_steel),
+          { v: num(item.applied_steel), strong: true },
+          pct(item.steel_progress || 0),
+          h.progress(item.overall_progress || 0),
+          h.badge(statusLabel(item.status, isAr), item.status === DONE ? 'success' : item.status === ACTIVE ? 'warn' : undefined),
+          { v: item.notes || '-', tone: 'muted' },
+        ],
+      })),
+      foot: [
+        { v: isAr ? 'المجموع الكلي' : 'Total', colspan: 3, strong: true },
+        num(stats.totPieces), { v: num(stats.appPieces), tone: 'success' }, pct(stats.piecesProg),
+        num(stats.totSteel), num(stats.appSteel), pct(stats.steelProg),
+        pct(stats.overallProg, 2),
+        `${stats.completedCount} / ${stats.count}`,
+        '',
+      ],
+    }), { index: 1 }),
+  ].map(String).join('');
+
+  return buildReport({
+    lang,
+    orientation: 'landscape',
+    title: isAr ? 'تقرير تقدم أعمال الماربلكس وستيلات التثبيت' : 'Marblex & Fixing Steel Progress',
+    subtitle: `${zoneText} · ${statusText}`,
+    code: docCode('MBX'),
+    meta: [
+      { label: isAr ? 'المهندس المسؤول' : 'Engineer', value: user?.name || '-' },
+      { label: isAr ? 'الزون' : 'Zone', value: zoneText },
+      { label: isAr ? 'الحالة' : 'Status', value: statusText },
+      { label: isAr ? 'عدد المقاطع' : 'Sections', value: String(list.length) },
+    ],
+    body,
+    signatures: [
+      { ar: 'مهندس الموقع الميداني', en: 'Site Engineer' },
+      { ar: 'المهندس المقيم', en: 'Resident Engineer' },
+      { ar: 'دائرة المهندس المقيم / الإشراف', en: 'Supervision Office' },
+    ],
+  });
 }

@@ -1,413 +1,257 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Building2, 
-  TrendingUp, 
-  Package, 
-  Users, 
-  Printer, 
-  Calendar, 
-  Sparkles, 
-  DollarSign, 
-  BarChart3,
-  FileCheck2,
-  AlertTriangle
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Printer, Receipt, Layers, Users, Banknote, CalendarRange, FileText } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+import { num, iqd, date as fmtDate } from '../utils/format';
+import { buildReport, openReport, h, docCode } from '../utils/report';
+import { advanceData, cumTotal, dueAdvance } from '../utils/advance';
+import { StatCard, EmptyState, LoadingBlock, Segmented } from './ui';
 
-export default function ExecutiveSummary({ lang = 'ar', t = (k) => k }) {
+const ZONES = ['zone_a', 'zone_b', 'zone_c'];
+
+// Each record type keeps its date in a different field.
+const dateOf = {
+  material: (r) => r.date || r.created_at,
+  advance: (r) => r.receipt_date || advanceData(r).receipt_date || r.created_at,
+  wage: (r) => r.work_date || r.created_at,
+};
+
+function inPeriod(value, period) {
+  if (period === 'all') return true;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return true;
+  const now = new Date();
+  let y = now.getFullYear();
+  let m = now.getMonth();
+  if (period === 'last_month') {
+    m -= 1;
+    if (m < 0) { m = 11; y -= 1; }
+  }
+  return d.getFullYear() === y && d.getMonth() === m;
+}
+
+export default function ExecutiveSummary({ lang = 'ar', user }) {
+  const isAr = lang === 'ar';
   const [loading, setLoading] = useState(true);
-  const [materialsReports, setMaterialsReports] = useState([]);
-  const [weeklyAdvances, setWeeklyAdvances] = useState([]);
-  const [workersWages, setWorkersWages] = useState([]);
-  const [dateFilter, setDateFilter] = useState('all'); // 'all', 'this_month', 'last_month'
+  const [materials, setMaterials] = useState([]);
+  const [advances, setAdvances] = useState([]);
+  const [wages, setWages] = useState([]);
+  const [period, setPeriod] = useState('all');
 
   useEffect(() => {
-    const fetchAllData = async () => {
-      setLoading(true);
-      try {
-        const [matRes, advRes, wagRes] = await Promise.all([
-          apiFetch('/api/materials-consumption').catch(() => null),
-          apiFetch('/api/weekly-advance').catch(() => null),
-          apiFetch('/api/workers-wages').catch(() => null)
-        ]);
-
-        if (matRes && matRes.ok) {
-          const matData = await matRes.json();
-          setMaterialsReports(matData);
-        }
-        if (advRes && advRes.ok) {
-          const advData = await advRes.json();
-          setWeeklyAdvances(advData);
-        }
-        if (wagRes && wagRes.ok) {
-          const wagData = await wagRes.json();
-          setWorkersWages(wagData);
-        }
-      } catch (err) {
-        console.error('Error fetching executive summary data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAllData();
+    let cancelled = false;
+    (async () => {
+      const [mat, adv, wag] = await Promise.all(
+        ['/api/materials-consumption', '/api/weekly-advance', '/api/workers-wages'].map(url =>
+          apiFetch(url).then(r => (r.ok ? r.json() : [])).catch(() => []))
+      );
+      if (cancelled) return;
+      setMaterials(Array.isArray(mat) ? mat : []);
+      setAdvances(Array.isArray(adv) ? adv : []);
+      setWages(Array.isArray(wag) ? wag : []);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  // Filter reports based on date range
-  const filterByDate = (items) => {
-    if (dateFilter === 'all') return items;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
+  const data = useMemo(() => {
+    const mats = materials.filter(r => inPeriod(dateOf.material(r), period));
+    const advs = advances.filter(r => inPeriod(dateOf.advance(r), period));
+    const wags = wages.filter(r => inPeriod(dateOf.wage(r), period));
 
-    return items.filter(item => {
-      const itemDate = new Date(item.date || item.created_at || Date.now());
-      if (isNaN(itemDate.getTime())) return true;
-      
-      if (dateFilter === 'this_month') {
-        return itemDate.getFullYear() === currentYear && itemDate.getMonth() === currentMonth;
-      }
-      if (dateFilter === 'last_month') {
-        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-        return itemDate.getFullYear() === prevYear && itemDate.getMonth() === prevMonth;
-      }
-      return true;
-    });
-  };
-
-  const filteredMaterials = filterByDate(materialsReports);
-  const filteredAdvances  = filterByDate(weeklyAdvances);
-  const filteredWages     = filterByDate(workersWages);
-
-  // Executive KPI Calculations
-  const latestMaterial = filteredMaterials[0] || {};
-  const latestAdvance  = filteredAdvances[0] || {};
-
-  // Marble stock from latest report
-  let latestNetWhite = 0, latestNetBrown = 0;
-  if (latestMaterial.marble) {
-    ['zone_a', 'zone_b', 'zone_c'].forEach(z => {
-      latestNetWhite += parseInt(latestMaterial.marble?.[z]?.white?.total) || 0;
-      latestNetBrown += parseInt(latestMaterial.marble?.[z]?.brown?.total) || 0;
-    });
-  }
-
-  // Calculate total advance due across filtered advances
-  const totalAdvancesDue = filteredAdvances.reduce((acc, curr) => {
-    const dataObj = curr.data || curr;
-    const due = parseFloat(dataObj.due_advance_override || dataObj.due_advance || 0);
-    return acc + (isNaN(due) ? 0 : due);
-  }, 0);
-
-  // Calculate total worker wages across filtered wages
-  const totalWagesPaid = filteredWages.reduce((acc, curr) => {
-    const dataObj = curr.data || curr;
-    const total = parseFloat(dataObj.total_wages || dataObj.grand_total || 0);
-    return acc + (isNaN(total) ? 0 : total);
-  }, 0);
-
-  // Master Executive PDF Export
-  const handlePrintMasterReport = () => {
-    const printDate = new Date().toLocaleDateString('ar-EG');
-
-    let advancesHtmlRows = '';
-    filteredAdvances.slice(0, 10).forEach(adv => {
-      const d = adv.data || adv;
-      advancesHtmlRows += `
-        <tr>
-          <td>${d.date || '-'}</td>
-          <td>${d.tech_name || d.team_leader || '-'}</td>
-          <td>${d.work_type || d.team_number || '-'}</td>
-          <td style="text-align:center;font-weight:700;">${(parseFloat(d.cumulative_total || 0)).toLocaleString()} د.ع</td>
-          <td style="text-align:center;font-weight:800;color:#b45309;">${(parseFloat(d.due_advance_override || d.due_advance || 0)).toLocaleString()} د.ع</td>
-        </tr>
-      `;
-    });
-
-    const html = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8"/>
-  <title>التقرير التنفيذي الشامل - موقع الجندي المجهول</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      font-family: 'Cairo', sans-serif;
-      color: #1a1a2e; background: #fff; direction: rtl; font-size: 10.5pt; line-height: 1.6;
-      -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    const latest = mats[0] || null;
+    let white = 0;
+    let brown = 0;
+    if (latest?.marble) {
+      ZONES.forEach(z => {
+        white += parseInt(latest.marble?.[z]?.white?.total, 10) || 0;
+        brown += parseInt(latest.marble?.[z]?.brown?.total, 10) || 0;
+      });
     }
-    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 12mm 15mm; }
-    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1a1a2e; padding-bottom: 12px; margin-bottom: 20px; }
-    .org h1 { font-size: 15pt; font-weight: 900; }
-    .org p { font-size: 9pt; color: #555; }
-    .badge { background: #f59e0b; color: #fff; font-size: 8.5pt; font-weight: 700; padding: 3px 12px; border-radius: 20px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
-    .kpi-card { border: 1.5px solid #d0d0d8; border-radius: 8px; padding: 10px; text-align: center; background: #fafafa; }
-    .kpi-lbl { font-size: 8.5pt; color: #666; font-weight: 600; }
-    .kpi-val { font-size: 13pt; font-weight: 900; color: #1a1a2e; margin-top: 4px; }
-    .sec-title { font-size: 11pt; font-weight: 800; color: #fff; background: #1a1a2e; padding: 6px 12px; border-radius: 6px 6px 0 0; margin-top: 15px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1.5px solid #d0d0d8; }
-    th { background: #f0f0f5; font-weight: 700; padding: 6px 10px; border: 1px solid #d0d0d8; font-size: 9.5pt; }
-    td { padding: 6px 10px; border: 1px solid #e0e0e8; font-size: 9.5pt; }
-    .footer { margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px; display: flex; justify-content: space-between; font-size: 8pt; color: #888; }
-    .sigs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 25px; }
-    .sig-box { border: 1px solid #ccc; border-radius: 6px; padding: 8px; text-align: center; font-size: 8.5pt; }
-  </style>
-</head>
-<body>
-  <div class="page">
-    <div class="header">
-      <div class="org">
-        <h1>متابعة موقع الجندي المجهول</h1>
-        <p>شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</p>
-      </div>
-      <div style="text-align:left;">
-        <div style="font-size:13pt;font-weight:900;">📊 التقرير التنفيذي والمالي الشامل</div>
-        <span class="badge">تقرير إداري معتمد</span>
-      </div>
-    </div>
 
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-lbl">إجمالي السلف المستحقة</div>
-        <div class="kpi-val" style="color:#b45309;">${totalAdvancesDue.toLocaleString()} د.ع</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-lbl">رصيد المرمر الأبيض</div>
-        <div class="kpi-val">${latestNetWhite.toLocaleString()} قطعة</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-lbl">رصيد المرمر الجوزي</div>
-        <div class="kpi-val" style="color:#b45309;">${latestNetBrown.toLocaleString()} قطعة</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-lbl">إجمالي أجور العمال</div>
-        <div class="kpi-val">${totalWagesPaid.toLocaleString()} د.ع</div>
-      </div>
-    </div>
+    const advRows = advs.map(r => {
+      const f = advanceData(r);
+      return {
+        id: r.id,
+        date: dateOf.advance(r),
+        leader: r.team_leader || f.tech_name || '-',
+        work: r.team_number || f.work_type || '-',
+        cumulative: cumTotal(f),
+        due: dueAdvance(f),
+      };
+    });
 
-    <div class="sec-title">1. سجل السلف المقدمة الأخيرة</div>
-    <table>
-      <thead>
-        <tr>
-          <th>التاريخ</th>
-          <th>المسؤول / الفني</th>
-          <th>نوع العمل</th>
-          <th style="text-align:center;">التراكمي الإجمالي</th>
-          <th style="text-align:center;">مبلغ السلفة المستحق</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${advancesHtmlRows || '<tr><td colspan="5" style="text-align:center;">لا توجد سجلات سلف في هذه الفترة</td></tr>'}
-      </tbody>
-    </table>
+    return {
+      latest,
+      white,
+      brown,
+      advRows,
+      advanceDue: advRows.reduce((s, r) => s + r.due, 0),
+      wagesTotal: wags.reduce((s, r) => s + (Number(r.total_amount) || 0), 0),
+      wagesShifts: wags.reduce((s, r) => s + (Number(r.shifts_count) || 0), 0),
+      wagesCount: wags.length,
+      cement: latest?.bulk?.cement || '0',
+      sand: latest?.bulk?.sand || '0',
+    };
+  }, [materials, advances, wages, period]);
 
-    <div class="sec-title">2. ملخص رصيد المخزن والمواد الحالية</div>
-    <table>
-      <thead>
-        <tr>
-          <th>المادة</th>
-          <th style="text-align:center;">حالة الرصيد</th>
-          <th>ملاحظات وتوجيهات الإدارة</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>مرمر أبيض (إجمالي كافة الزونات)</td>
-          <td style="text-align:center;font-weight:800;">${latestNetWhite.toLocaleString()} قطعة</td>
-          <td>متوفر ومستمر في موقع الإكساء</td>
-        </tr>
-        <tr>
-          <td>مرمر جوزي (إجمالي كافة الزونات)</td>
-          <td style="text-align:center;font-weight:800;color:#b45309;">${latestNetBrown.toLocaleString()} قطعة</td>
-          <td>مستمر في زون B و C</td>
-        </tr>
-        <tr>
-          <td>مواد البناء السائبة (أسمنت ورمل)</td>
-          <td style="text-align:center;font-weight:700;">${latestMaterial.bulk?.cement || '-'} كيس أسمنت | ${latestMaterial.bulk?.sand || '-'} رمل</td>
-          <td>متابعة التجهيز الموقعي</td>
-        </tr>
-      </tbody>
-    </table>
+  const periodLabel = {
+    all: isAr ? 'كل الفترات' : 'All time',
+    this_month: isAr ? 'هذا الشهر' : 'This month',
+    last_month: isAr ? 'الشهر الماضي' : 'Last month',
+  }[period];
 
-    <div class="sigs">
-      <div class="sig-box"><strong>مشرف الموقع</strong><br/><br/>التوقيع والختم</div>
-      <div class="sig-box"><strong>المعاون الفني</strong><br/><br/>التوقيع والختم</div>
-      <div class="sig-box"><strong>مدير المشروع</strong><br/><br/>التوقيع والختم</div>
-    </div>
+  const print = () => openReport(buildExecutiveReport({ data, periodLabel, user, lang }), {
+    title: isAr ? 'التقرير التنفيذي الشامل' : 'Executive summary',
+  });
 
-    <div class="footer">
-      <span>متابعة موقع الجندي المجهول - شركة رؤية الحداثة للخدمات الهندسية</span>
-      <span>تاريخ طباعة التقرير: ${printDate}</span>
-    </div>
-  </div>
-  <script>
-    window.onload = function() { setTimeout(function() { window.print(); }, 500); };
-  <\/script>
-</body>
-</html>`;
-
-    const win = window.open('', '_blank', 'width=900,height=1100');
-    if (win) {
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
-    }
-  };
+  if (loading) return <LoadingBlock label={isAr ? 'جارٍ تجميع التقرير' : 'Compiling summary'} />;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', width: '100%' }}>
-      {/* Header Panel */}
-      <motion.div 
-        className="glass-panel"
-        style={{ gridColumn: 'span 12', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', padding: '1.5rem' }}
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-            <BarChart3 size={24} style={{ color: 'var(--accent)' }} />
-            {lang === 'ar' ? 'التقرير التنفيذي الشامل للمشروع' : 'Executive Summary Dashboard'}
-          </h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '4px', marginBottom: 0 }}>
-            {lang === 'ar' ? 'ملخص مالي وميداني شامل يجمع السلف، رصيد المواد، وأجور العمال في مكان واحد' : 'Unified executive overview of advances, inventory, and worker wages'}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* Date Range Selector */}
-          <select 
-            className="form-input" 
-            style={{ width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-          >
-            <option value="all">{lang === 'ar' ? '📅 كافة الفترات السابقة' : 'All Time'}</option>
-            <option value="this_month">{lang === 'ar' ? '📅 هذا الشهر الحالي' : 'This Month'}</option>
-            <option value="last_month">{lang === 'ar' ? '📅 الشهر الماضي' : 'Last Month'}</option>
-          </select>
-
-          <button 
-            className="btn btn-primary"
-            onClick={handlePrintMasterReport}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
-          >
-            <Printer size={18} />
-            {lang === 'ar' ? 'تصدير التقرير الشهري الشامل PDF' : 'Export Monthly PDF Report'}
+    <div className="stack">
+      <section className="card">
+        <div className="card-body toolbar">
+          <span className="toolbar-grow text-sm muted"><CalendarRange size={16} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-3px', marginInlineEnd: 'var(--space-2)' }} />
+            {isAr ? 'ملخص السلف ورصيد المواد وأجور العمال للفترة المختارة.' : 'Advances, stock and wages for the selected period.'}</span>
+          <Segmented
+            label={isAr ? 'الفترة' : 'Period'}
+            value={period}
+            onChange={setPeriod}
+            options={[
+              { value: 'all', label: isAr ? 'الكل' : 'All' },
+              { value: 'this_month', label: isAr ? 'هذا الشهر' : 'This month' },
+              { value: 'last_month', label: isAr ? 'الشهر الماضي' : 'Last month' },
+            ]}
+          />
+          <button type="button" className="btn btn--primary" onClick={print}>
+            <Printer size={18} aria-hidden="true" />
+            {isAr ? 'التقرير الشامل PDF' : 'Summary PDF'}
           </button>
         </div>
-      </motion.div>
+      </section>
 
-      {/* KPI Cards */}
-      <div style={{ gridColumn: 'span 12', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.2rem' }}>
-        
-        {/* Card 1: Total Advances */}
-        <motion.div className="glass-panel" style={{ padding: '1.25rem', borderRight: '4px solid var(--accent)' }} whileHover={{ y: -3 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{lang === 'ar' ? 'إجمالي السلف المستحقة' : 'Total Due Advances'}</span>
-            <DollarSign size={20} style={{ color: 'var(--accent)' }} />
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--accent)' }}>
-            {totalAdvancesDue.toLocaleString()} <span style={{ fontSize: '0.9rem' }}>د.ع</span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-            {lang === 'ar' ? `المجموع لـ ${filteredAdvances.length} طلب سلفة مقدمة` : `Sum of ${filteredAdvances.length} advance requests`}
-          </span>
-        </motion.div>
+      <section className="stat-grid" aria-label={isAr ? 'الأرقام الرئيسية' : 'Key figures'}>
+        <StatCard className="stat--span2" label={isAr ? 'إجمالي السلف المستحقة' : 'Advances due'} value={num(data.advanceDue, { decimals: 0 })} unit={isAr ? 'د.ع' : 'IQD'}
+          icon={Receipt} tone="accent" meta={isAr ? `من ${data.advRows.length} قائمة سلفة` : `From ${data.advRows.length} advance lists`} />
+        <StatCard className="stat--span2" label={isAr ? 'إجمالي أجور العمال' : 'Workers wages'} value={num(data.wagesTotal, { decimals: 0 })} unit={isAr ? 'د.ع' : 'IQD'}
+          icon={Banknote} meta={isAr ? `${num(data.wagesShifts)} شفت في ${data.wagesCount} سجل` : `${num(data.wagesShifts)} shifts in ${data.wagesCount} records`} />
+        <StatCard label={isAr ? 'رصيد المرمر الأبيض' : 'White marble stock'} value={num(data.white)} unit={isAr ? 'قطعة' : 'pcs'} icon={Layers}
+          meta={data.latest ? (isAr ? `آخر جرد ${fmtDate(data.latest.date, lang)}` : `Count of ${fmtDate(data.latest.date, lang)}`) : (isAr ? 'لا يوجد جرد' : 'No count')} />
+        <StatCard label={isAr ? 'رصيد المرمر الجوزي' : 'Walnut marble stock'} value={num(data.brown)} unit={isAr ? 'قطعة' : 'pcs'} icon={Layers} tone="warn"
+          meta={data.latest ? (isAr ? 'كل الزونات' : 'All zones') : ''} />
+      </section>
 
-        {/* Card 2: Marble White Stock */}
-        <motion.div className="glass-panel" style={{ padding: '1.25rem', borderRight: '4px solid var(--info)' }} whileHover={{ y: -3 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{lang === 'ar' ? 'رصيد المرمر الأبيض المتبقي' : 'White Marble Stock'}</span>
-            <Package size={20} style={{ color: 'var(--info)' }} />
+      <div className="grid-main-side">
+        <section className="card" aria-labelledby="ex-adv">
+          <div className="card-header card-header--divided">
+            <h2 id="ex-adv" className="card-title"><Receipt size={20} aria-hidden="true" />{isAr ? 'السلف المقدمة والاستحقاقات' : 'Advances & amounts due'}</h2>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '900', color: '#eef2f7' }}>
-            {latestNetWhite.toLocaleString()} <span style={{ fontSize: '0.9rem' }}>قطعة</span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-            {lang === 'ar' ? 'إجمالي كافة الزونات من آخر جرد' : 'Total across all zones from last audit'}
-          </span>
-        </motion.div>
-
-        {/* Card 3: Marble Brown Stock */}
-        <motion.div className="glass-panel" style={{ padding: '1.25rem', borderRight: '4px solid #f59e0b' }} whileHover={{ y: -3 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{lang === 'ar' ? 'رصيد المرمر الجوزي المتبقي' : 'Brown Marble Stock'}</span>
-            <Package size={20} style={{ color: '#f59e0b' }} />
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '900', color: '#f59e0b' }}>
-            {latestNetBrown.toLocaleString()} <span style={{ fontSize: '0.9rem' }}>قطعة</span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-            {lang === 'ar' ? 'إجمالي كافة الزونات من آخر جرد' : 'Total across all zones from last audit'}
-          </span>
-        </motion.div>
-
-        {/* Card 4: Total Wages */}
-        <motion.div className="glass-panel" style={{ padding: '1.25rem', borderRight: '4px solid var(--success)' }} whileHover={{ y: -3 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{lang === 'ar' ? 'إجمالي أجور العمال' : 'Total Worker Wages'}</span>
-            <Users size={20} style={{ color: 'var(--success)' }} />
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--success)' }}>
-            {totalWagesPaid.toLocaleString()} <span style={{ fontSize: '0.9rem' }}>د.ع</span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-            {lang === 'ar' ? `المجموع لـ ${filteredWages.length} سجل أجور موثق` : `Sum of ${filteredWages.length} wage records`}
-          </span>
-        </motion.div>
-      </div>
-
-      {/* Main Breakdown Section */}
-      <div className="glass-panel" style={{ gridColumn: 'span 12', padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: '800', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <FileCheck2 size={20} style={{ color: 'var(--accent)' }} />
-          {lang === 'ar' ? 'جدول السلف المقدمة والاستحقاقات المالية الحالية' : 'Recent Advances & Financial Settlements'}
-        </h3>
-
-        <div className="table-responsive">
-          <table className="project-table">
-            <thead>
-              <tr>
-                <th>{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
-                <th>{lang === 'ar' ? 'المسؤول / الفني' : 'Team Leader'}</th>
-                <th>{lang === 'ar' ? 'نوع العمل' : 'Work Type'}</th>
-                <th style={{ textAlign: 'center' }}>{lang === 'ar' ? 'الإجمالي التراكمي' : 'Cumulative'}</th>
-                <th style={{ textAlign: 'center' }}>{lang === 'ar' ? 'مبلغ السلفة المستحق' : 'Due Advance'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAdvances.length > 0 ? (
-                filteredAdvances.slice(0, 8).map((adv, idx) => {
-                  const d = adv.data || adv;
-                  return (
-                    <tr key={adv.id || idx}>
-                      <td>{d.date || '-'}</td>
-                      <td style={{ fontWeight: '700' }}>{d.tech_name || d.team_leader || '-'}</td>
-                      <td>{d.work_type || d.team_number || '-'}</td>
-                      <td style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}>
-                        {(parseFloat(d.cumulative_total || 0)).toLocaleString()} د.ع
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: '800', color: 'var(--accent)', fontFamily: 'var(--font-english)' }}>
-                        {(parseFloat(d.due_advance_override || d.due_advance || 0)).toLocaleString()} د.ع
-                      </td>
+          {data.advRows.length === 0 ? (
+            <EmptyState icon={Receipt} title={isAr ? 'لا توجد سلف في هذه الفترة' : 'No advances in this period'} />
+          ) : (
+            <div className="table-wrap">
+              <table className="dt dt--stack">
+                <thead>
+                  <tr>
+                    <th>{isAr ? 'المسؤول / الفني' : 'Technician'}</th>
+                    <th>{isAr ? 'التاريخ' : 'Date'}</th>
+                    <th>{isAr ? 'نوع العمل' : 'Work'}</th>
+                    <th className="c-num">{isAr ? 'الإجمالي التراكمي' : 'Cumulative'}</th>
+                    <th className="c-num">{isAr ? 'المستحق' : 'Due'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.advRows.slice(0, 10).map(r => (
+                    <tr key={r.id}>
+                      <td className="c-title">{r.leader}</td>
+                      <td data-label={isAr ? 'التاريخ' : 'Date'}><span className="num">{r.date || '-'}</span></td>
+                      <td data-label={isAr ? 'نوع العمل' : 'Work'}>{r.work}</td>
+                      <td className="c-num" data-label={isAr ? 'التراكمي' : 'Cumulative'}><span className="num">{num(r.cumulative, { decimals: 0 })}</span></td>
+                      <td className="c-num c-strong" data-label={isAr ? 'المستحق' : 'Due'}><span className="num text-accent">{num(r.due, { decimals: 0 })}</span></td>
                     </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', color: 'var(--muted)', padding: '2rem' }}>
-                    {lang === 'ar' ? 'لا توجد سجلات سلف مقدمة في هذه الفترة' : 'No advance records found'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="card" aria-labelledby="ex-stock">
+          <div className="card-header card-header--divided">
+            <div>
+              <h2 id="ex-stock" className="card-title"><FileText size={20} aria-hidden="true" />{isAr ? 'رصيد المخزن الحالي' : 'Current stock'}</h2>
+              {data.latest && <p className="card-subtitle">{isAr ? 'من آخر جرد يومي' : 'From the latest daily count'} · {fmtDate(data.latest.date, lang)}</p>}
+            </div>
+          </div>
+          {data.latest ? (
+            <ul className="list">
+              <li className="list-item"><span className="list-item-main">{isAr ? 'مرمر أبيض (كل الزونات)' : 'White marble (all zones)'}</span><strong className="num">{num(data.white)}</strong></li>
+              <li className="list-item"><span className="list-item-main">{isAr ? 'مرمر جوزي (كل الزونات)' : 'Walnut marble (all zones)'}</span><strong className="num">{num(data.brown)}</strong></li>
+              <li className="list-item"><span className="list-item-main">{isAr ? 'الأسمنت (كيس)' : 'Cement (bags)'}</span><strong className="num">{data.cement}</strong></li>
+              <li className="list-item"><span className="list-item-main">{isAr ? 'الرمل' : 'Sand'}</span><strong>{data.sand}</strong></li>
+              <li className="list-item"><span className="list-item-main">{isAr ? 'معد الجرد' : 'Counted by'}</span><span>{data.latest.prepared_by || '-'}</span></li>
+            </ul>
+          ) : (
+            <EmptyState icon={Users} title={isAr ? 'لا يوجد جرد في هذه الفترة' : 'No count in this period'} />
+          )}
+        </section>
       </div>
     </div>
   );
+}
+
+function buildExecutiveReport({ data, periodLabel, user, lang }) {
+  const isAr = lang === 'ar';
+  const body = [
+    h.kpis([
+      { label: isAr ? 'إجمالي السلف المستحقة' : 'Advances due', value: iqd(data.advanceDue, lang), tone: 'success', sub: isAr ? `${data.advRows.length} قائمة` : `${data.advRows.length} lists` },
+      { label: isAr ? 'إجمالي أجور العمال' : 'Workers wages', value: iqd(data.wagesTotal, lang), sub: isAr ? `${num(data.wagesShifts)} شفت` : `${num(data.wagesShifts)} shifts` },
+      { label: isAr ? 'رصيد المرمر الأبيض' : 'White marble', value: `${num(data.white)}` },
+      { label: isAr ? 'رصيد المرمر الجوزي' : 'Walnut marble', value: `${num(data.brown)}` },
+    ]),
+    h.section(isAr ? 'السلف المقدمة الأخيرة' : 'Recent advances', h.table({
+      columns: [
+        { label: isAr ? 'التاريخ' : 'Date', align: 'center', width: '24mm' },
+        { label: isAr ? 'المسؤول / الفني' : 'Technician' },
+        { label: isAr ? 'نوع العمل' : 'Work' },
+        { label: isAr ? 'الإجمالي التراكمي' : 'Cumulative', align: 'center', width: '32mm' },
+        { label: isAr ? 'المستحق' : 'Due', align: 'center', width: '32mm' },
+      ],
+      rows: data.advRows.slice(0, 15).map(r => [
+        r.date || '-', { v: r.leader, strong: true }, r.work,
+        iqd(r.cumulative, lang), { v: iqd(r.due, lang), strong: true, tone: 'success' },
+      ]),
+      foot: [{ v: isAr ? 'المجموع' : 'Total', colspan: 3, strong: true }, iqd(data.advRows.reduce((s, r) => s + r.cumulative, 0), lang), iqd(data.advanceDue, lang)],
+    }), { index: 1 }),
+    h.section(isAr ? 'رصيد المخزن والمواد' : 'Stock & materials', h.table({
+      columns: [
+        { label: isAr ? 'المادة' : 'Item' },
+        { label: isAr ? 'الرصيد' : 'Balance', align: 'center', width: '40mm' },
+      ],
+      rows: [
+        [isAr ? 'مرمر أبيض (كل الزونات)' : 'White marble (all zones)', { v: `${num(data.white)} ${isAr ? 'قطعة' : 'pcs'}`, strong: true }],
+        [isAr ? 'مرمر جوزي (كل الزونات)' : 'Walnut marble (all zones)', { v: `${num(data.brown)} ${isAr ? 'قطعة' : 'pcs'}`, strong: true }],
+        [isAr ? 'الأسمنت' : 'Cement', `${data.cement} ${isAr ? 'كيس' : 'bags'}`],
+        [isAr ? 'الرمل' : 'Sand', data.sand],
+      ],
+    }), { index: 2, note: data.latest ? `${isAr ? 'آخر جرد' : 'Latest count'} ${data.latest.date}` : '' }),
+  ].map(String).join('');
+
+  return buildReport({
+    lang,
+    title: isAr ? 'التقرير التنفيذي والمالي الشامل' : 'Executive & Financial Summary',
+    subtitle: periodLabel,
+    code: docCode('EXE'),
+    meta: [
+      { label: isAr ? 'الفترة' : 'Period', value: periodLabel },
+      { label: isAr ? 'أعدّه' : 'Prepared by', value: user?.name || '-' },
+      { label: isAr ? 'قوائم السلف' : 'Advance lists', value: String(data.advRows.length) },
+      { label: isAr ? 'سجلات الأجور' : 'Wage records', value: String(data.wagesCount) },
+    ],
+    body,
+    signatures: [
+      { ar: 'مشرف الموقع', en: 'Site Supervisor' },
+      { ar: 'المعاون الفني', en: 'Technical Assistant' },
+      { ar: 'مدير المشروع', en: 'Project Director' },
+    ],
+  });
 }

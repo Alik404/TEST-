@@ -1437,7 +1437,8 @@ app.get('/api/users', requireSuperAdmin, async (req, res) => {
       }
     }
 
-    const rows = await sqliteAll('SELECT id, email, name, role, created_at FROM users ORDER BY id ASC');
+    // Older databases have no created_at column; the list does not need it.
+    const rows = await sqliteAll('SELECT id, email, name, role FROM users ORDER BY id ASC');
     res.json(rows);
   } catch (err) {
     console.error('Fetch users error:', err);

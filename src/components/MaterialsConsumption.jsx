@@ -1,17 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Layers, Calendar, Clock, User, Save, Trash2, Edit2, Copy, Printer,
-  Plus, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle, FileText, Sparkles
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Save, Trash2, Pencil, Copy, Printer, Plus, ArrowLeft, ArrowRight, AlertTriangle,
+  FileText, Camera, X, Eye, CheckCircle2, PackageOpen, CalendarDays
 } from 'lucide-react';
-import { apiFetch } from '../utils/api';
+import { apiFetch, apiErrorMessage } from '../utils/api';
+import { num, date as fmtDate, isoDay } from '../utils/format';
+import { toast } from '../utils/toast';
+import { buildReport, openReport, h } from '../utils/report';
+import { canEdit } from '../navigation';
+import { EmptyState, Modal, Field, ConfirmDialog, LoadingBlock } from './ui';
 
 const INITIAL_FORM_STATE = {
-  date: new Date().toISOString().split('T')[0],
+  date: isoDay(),
   day: 'الأحد',
   start_time: '08:00',
   end_time: '17:00',
-  prepared_by: 'علي حاتم',
+  prepared_by: '',
   basics: {
     varnish: { pulled: '', remaining: '' },
     granite_granules: { pulled: '', remaining: '' },
@@ -62,145 +66,166 @@ const DAYS_OF_WEEK = {
   en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 };
 
-export default function MaterialsConsumption({ user, t, lang }) {
-  const [viewMode, setViewMode] = useState('history'); // 'history' or 'form'
-  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [submitError, setSubmitError] = useState('');
-  const [isEditingId, setIsEditingId] = useState(null);
-  const [isCloned, setIsCloned] = useState(false);
-  const [showAutoSaveIndicator, setShowAutoSaveIndicator] = useState(false);
-  const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
-  const [expandedReportId, setExpandedReportId] = useState(null);
-  const [originalDataForEdit, setOriginalDataForEdit] = useState(null);
-  const [reportToDelete, setReportToDelete] = useState(null);
-  const [deletingReportId, setDeletingReportId] = useState(null);
+const ZONES = ['zone_a', 'zone_b', 'zone_c'];
+const ZONE_NAMES = { zone_a: 'A', zone_b: 'B', zone_c: 'C' };
+const DRAFT_KEY = 'materials_consumption_draft';
+const MAX_IMAGES = 6;
 
-  // Thresholds for Low Stock Alerts
-  const DEFAULT_THRESHOLDS = {
-    varnish: 10, granite_granules: 50, brown_paint: 3, gray_base: 5, putty: 10, primer: 10, roller: 5,
-    beige_paint: 10, white_paint: 100, tape: 5, sponge_1cm: 5, sponge_2cm: 5, sponge_3cm: 5,
-    cement: 15, sand: 1
-  };
+// Stock at or below these levels raises a low-stock alert.
+const DEFAULT_THRESHOLDS = {
+  varnish: 10, granite_granules: 50, brown_paint: 3, gray_base: 5, putty: 10, primer: 10, roller: 5,
+  beige_paint: 10, white_paint: 100, tape: 5, sponge_1cm: 5, sponge_2cm: 5, sponge_3cm: 5,
+  cement: 15, sand: 1
+};
 
-  const getLowStockItems = (data) => {
-    let alerts = [];
-    if (!data) return alerts;
+const LABELS = {
+  varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت', brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
+  putty: 'معجون', primer: 'برايمر', roller: 'رولة',
+  beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض', tape: 'تيب لاصق',
+  sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم',
+  cement: 'أسمنت', sand: 'رمل'
+};
 
-    const itemNames = {
-      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت', brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
-      putty: 'معجون', primer: 'برايمر (أساسيات)', roller: 'رولة',
-      beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض', tape: 'تيب لاصق',
-      sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم',
-      cement: 'أسمنت', sand: 'رمل'
-    };
+const SECTION_TITLES = {
+  basics: { ar: 'الماربلكس والمواد الأساسية', en: 'Marblex & basic materials' },
+  marble: { ar: 'جرد المرمر حسب الزون واللون', en: 'Marble count by zone and colour' },
+  sealants: { ar: 'الصوصج والمواد العازلة', en: 'Sealants & insulation' },
+  bulk: { ar: 'المواد السائبة (أسمنت ورمل وفوم)', en: 'Bulk materials (cement, sand, foam)' },
+};
 
-    // Basics
-    Object.entries(data.basics || {}).forEach(([k, item]) => {
-      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes') || !item) return;
+const isItemKey = (k) => !(k === 'section_notes' || k === 'notes' || k.endsWith('_notes'));
+const clone = (v) => JSON.parse(JSON.stringify(v));
+const dayFor = (iso) => DAYS_OF_WEEK.ar[new Date(`${iso}T12:00:00`).getDay()] || '';
+
+function getLowStockItems(data) {
+  const alerts = [];
+  if (!data) return alerts;
+  ['basics', 'sealants'].forEach(section => {
+    Object.entries(data[section] || {}).forEach(([k, item]) => {
+      if (!isItemKey(k) || !item) return;
       const rem = parseFloat(item.remaining);
       const thresh = DEFAULT_THRESHOLDS[k];
-      if (thresh !== undefined && !isNaN(rem) && rem <= thresh) {
-        alerts.push({ key: k, name: itemNames[k] || k, category: 'المواد الأساسية والماربلكس', remaining: rem, threshold: thresh });
+      if (thresh !== undefined && !Number.isNaN(rem) && rem <= thresh) {
+        alerts.push({ key: `${section}-${k}`, name: LABELS[k] || k, remaining: rem, threshold: thresh });
       }
     });
-
-    // Sealants
-    Object.entries(data.sealants || {}).forEach(([k, item]) => {
-      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes') || !item) return;
-      const rem = parseFloat(item.remaining);
-      const thresh = DEFAULT_THRESHOLDS[k];
-      if (thresh !== undefined && !isNaN(rem) && rem <= thresh) {
-        alerts.push({ key: k, name: itemNames[k] || k, category: 'المواد العازلة والصوصج', remaining: rem, threshold: thresh });
-      }
-    });
-
-    // Bulk Cement
-    if (data.bulk?.cement) {
-      const cRem = parseFloat(data.bulk.cement);
-      if (!isNaN(cRem) && cRem <= DEFAULT_THRESHOLDS.cement) {
-        alerts.push({ key: 'cement', name: 'أسمنت (سائبة)', category: 'المواد السائبة', remaining: cRem, threshold: DEFAULT_THRESHOLDS.cement });
-      }
+  });
+  if (data.bulk?.cement) {
+    const c = parseFloat(data.bulk.cement);
+    if (!Number.isNaN(c) && c <= DEFAULT_THRESHOLDS.cement) {
+      alerts.push({ key: 'cement', name: LABELS.cement, remaining: c, threshold: DEFAULT_THRESHOLDS.cement });
     }
+  }
+  return alerts;
+}
 
-    return alerts;
+// Section notes may live at the top level or inside the JSON columns.
+function normalizeReport(rep) {
+  if (!rep) return rep;
+  return {
+    ...rep,
+    site_images: Array.isArray(rep.site_images) ? rep.site_images : [],
+    basics_notes: rep.basics_notes !== undefined ? rep.basics_notes : (rep.basics?.section_notes || rep.basics?.basics_notes || ''),
+    marble_notes: rep.marble_notes !== undefined ? rep.marble_notes : (rep.marble?.section_notes || rep.marble?.marble_notes || ''),
+    sealants_notes: rep.sealants_notes !== undefined ? rep.sealants_notes : (rep.sealants?.section_notes || rep.sealants?.sealants_notes || ''),
+    bulk_notes: rep.bulk_notes !== undefined ? rep.bulk_notes : (rep.bulk?.section_notes || rep.bulk?.bulk_notes || '')
   };
+}
 
-  // Image Upload and Compression
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-
-    files.forEach(file => {
-      if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const maxDim = 800;
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.65);
-
-          setFormData(prev => {
-            const currentImages = Array.isArray(prev.site_images) ? prev.site_images : [];
-            if (currentImages.length >= 6) return prev;
-            return {
-              ...prev,
-              site_images: [...currentImages, compressedDataUrl]
-            };
-          });
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
+// Plain-text change log between the saved report and the edited one.
+function getDifferences(report, prev) {
+  const lines = [];
+  if (!prev) return lines;
+  ['basics', 'sealants'].forEach(section => {
+    Object.keys(report[section] || {}).forEach(k => {
+      if (!isItemKey(k)) return;
+      const oldP = prev[section]?.[k]?.pulled || '-';
+      const newP = report[section]?.[k]?.pulled || '-';
+      const oldR = prev[section]?.[k]?.remaining || '-';
+      const newR = report[section]?.[k]?.remaining || '-';
+      if (oldP !== newP || oldR !== newR) {
+        lines.push(`- ${LABELS[k] || k}: مسحوب (${oldP} -> ${newP}) | متبقي (${oldR} -> ${newR})`);
+      }
     });
-  };
+  });
+  const pairs = [
+    ['الأسمنت', prev.bulk?.cement, report.bulk?.cement],
+    ['الرمل', prev.bulk?.sand, report.bulk?.sand],
+    ['الفوم', prev.bulk?.foam?.pulled, report.bulk?.foam?.pulled],
+  ];
+  pairs.forEach(([label, a, b]) => {
+    if ((a || '-') !== (b || '-')) lines.push(`- ${label}: (${a || '-'} -> ${b || '-'})`);
+  });
+  ZONES.forEach(zone => {
+    ['white', 'brown'].forEach(c => {
+      const oldTotal = prev.marble?.[zone]?.[c]?.total || 0;
+      const newTotal = report.marble?.[zone]?.[c]?.total || 0;
+      if (oldTotal !== newTotal) {
+        lines.push(`- مرمر ${c === 'white' ? 'أبيض' : 'جوزي'} (زون ${ZONE_NAMES[zone]}): السابق (${oldTotal}) -> المحدث (${newTotal})`);
+      }
+    });
+  });
+  return lines;
+}
 
-  const handleRemoveImage = (indexToRemove) => {
-    setFormData(prev => ({
-      ...prev,
-      site_images: (prev.site_images || []).filter((_, idx) => idx !== indexToRemove)
-    }));
-  };
+function withTotals(data) {
+  const next = clone(data);
+  ZONES.forEach(zone => {
+    ['white', 'brown'].forEach(color => {
+      const z = next.marble[zone][color];
+      z.total = ((parseInt(z.skiliat, 10) || 0) * (parseInt(z.pieces_per_skilia, 10) || 0)) + (parseInt(z.loose, 10) || 0);
+    });
+  });
+  return next;
+}
 
-  // Helper to ensure section_notes are populated from top-level or embedded JSONB
-  const normalizeReport = (rep) => {
-    if (!rep) return rep;
-    return {
-      ...rep,
-      site_images: Array.isArray(rep.site_images) ? rep.site_images : [],
-      basics_notes: rep.basics_notes !== undefined ? rep.basics_notes : (rep.basics?.section_notes || rep.basics?.basics_notes || ''),
-      marble_notes: rep.marble_notes !== undefined ? rep.marble_notes : (rep.marble?.section_notes || rep.marble?.marble_notes || ''),
-      sealants_notes: rep.sealants_notes !== undefined ? rep.sealants_notes : (rep.sealants?.section_notes || rep.sealants?.sealants_notes || ''),
-      bulk_notes: rep.bulk_notes !== undefined ? rep.bulk_notes : (rep.bulk?.section_notes || rep.bulk?.bulk_notes || '')
-    };
-  };
+function marbleTotals(data) {
+  const t = { whiteSk: 0, brownSk: 0, whiteLoose: 0, brownLoose: 0, white: 0, brown: 0 };
+  ZONES.forEach(zone => {
+    const w = data.marble?.[zone]?.white || {};
+    const b = data.marble?.[zone]?.brown || {};
+    t.whiteSk += parseInt(w.skiliat, 10) || 0;
+    t.brownSk += parseInt(b.skiliat, 10) || 0;
+    t.whiteLoose += parseInt(w.loose, 10) || 0;
+    t.brownLoose += parseInt(b.loose, 10) || 0;
+    t.white += parseInt(w.total, 10) || 0;
+    t.brown += parseInt(b.total, 10) || 0;
+  });
+  return t;
+}
 
-  // 1. Fetch submitted reports on mount
+const readDraft = () => {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; }
+};
+const writeDraft = (data) => {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); } catch { /* storage full or blocked */ }
+};
+const clearDraft = () => {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing to clear */ }
+};
+
+export default function MaterialsConsumption({ user, t, lang }) {
+  const isAr = lang === 'ar';
+  const editable = canEdit(user);
+
+  const [mode, setMode] = useState('history'); // 'history' | 'form'
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
+  const [editingId, setEditingId] = useState(null);
+  const [isCloned, setIsCloned] = useState(false);
+  const [original, setOriginal] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [toDelete, setToDelete] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
   const fetchReports = async () => {
-    setLoading(true);
     try {
       const res = await apiFetch('/api/materials-consumption');
-      if (res.ok) {
-        const data = await res.json();
-        setReports(data.map(normalizeReport));
-      }
+      if (res.ok) setReports((await res.json()).map(normalizeReport));
     } catch (err) {
       console.error('Error fetching materials reports:', err);
     } finally {
@@ -208,1700 +233,879 @@ export default function MaterialsConsumption({ user, t, lang }) {
     }
   };
 
+  // Load once when the section opens (deferred so no state is set during the effect).
+  useEffect(() => { Promise.resolve().then(fetchReports); }, []);
+
+  // Autosave a new (not edited) report on this device while typing.
   useEffect(() => {
-    fetchReports();
-  }, []);
+    if (mode !== 'form' || editingId) return undefined;
+    const id = setTimeout(() => {
+      writeDraft(formData);
+      setDraftSaved(true);
+    }, 600);
+    return () => clearTimeout(id);
+  }, [formData, mode, editingId]);
 
-  // ── Helper: Calculate differences between two reports ──
-  const getDifferencesList = (report, prevReport) => {
-    let list = [];
-    if (!prevReport) return list;
-    
-    // Basics
-    const basicsLabels = {
-      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت',
-      brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
-      putty: 'معجون', primer: 'برايمر', roller: 'رولة'
-    };
-    Object.keys(report.basics || {}).forEach(k => {
-      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes')) return;
-      const oldP = prevReport.basics?.[k]?.pulled || '-';
-      const newP = report.basics?.[k]?.pulled || '-';
-      const oldR = prevReport.basics?.[k]?.remaining || '-';
-      const newR = report.basics?.[k]?.remaining || '-';
-      if (oldP !== newP || oldR !== newR) {
-        list.push(`<li><strong>${basicsLabels[k] || k}:</strong> مسحوب (${oldP} &rarr; ${newP}) | متبقي (${oldR} &rarr; ${newR})</li>`);
-      }
-    });
-
-    // Sealants
-    const sealantsLabels = {
-      beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض',
-      primer: 'برايمر', tape: 'تيب لاصق',
-      sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
-    };
-    Object.keys(report.sealants || {}).forEach(k => {
-      if (k === 'section_notes' || k === 'notes' || k.endsWith('_notes')) return;
-      const oldP = prevReport.sealants?.[k]?.pulled || '-';
-      const newP = report.sealants?.[k]?.pulled || '-';
-      const oldR = prevReport.sealants?.[k]?.remaining || '-';
-      const newR = report.sealants?.[k]?.remaining || '-';
-      if (oldP !== newP || oldR !== newR) {
-        list.push(`<li><strong>${sealantsLabels[k] || k}:</strong> مسحوب (${oldP} &rarr; ${newP}) | متبقي (${oldR} &rarr; ${newR})</li>`);
-      }
-    });
-
-    // Bulk
-    const oldC = prevReport.bulk?.cement || '-';
-    const newC = report.bulk?.cement || '-';
-    if (oldC !== newC) list.push(`<li><strong>الأسمنت:</strong> (${oldC} &rarr; ${newC})</li>`);
-
-    const oldS = prevReport.bulk?.sand || '-';
-    const newS = report.bulk?.sand || '-';
-    if (oldS !== newS) list.push(`<li><strong>الرمل:</strong> (${oldS} &rarr; ${newS})</li>`);
-
-    const oldFoam = prevReport.bulk?.foam?.pulled || '-';
-    const newFoam = report.bulk?.foam?.pulled || '-';
-    if (oldFoam !== newFoam) list.push(`<li><strong>الفوم:</strong> (${oldFoam} &rarr; ${newFoam})</li>`);
-
-    // Marble
-    const zones = ['zone_a', 'zone_b', 'zone_c'];
-    const zoneNames = { zone_a: 'زون A', zone_b: 'زون B', zone_c: 'زون C' };
-    zones.forEach(zone => {
-      ['white', 'brown'].forEach(c => {
-        const oldTotal = prevReport.marble?.[zone]?.[c]?.total || 0;
-        const newTotal = report.marble?.[zone]?.[c]?.total || 0;
-        if (oldTotal !== newTotal) {
-          const colorName = c === 'white' ? 'أبيض' : 'جوزي';
-          list.push(`<li><strong>مرمر ${colorName} (${zoneNames[zone]}):</strong> السابق (${oldTotal}) &rarr; المحدث (${newTotal})</li>`);
-        }
-      });
-    });
-
-    return list;
-  };
-
-  // ── Generate and print PDF report (Supports All sections OR Section-specific) ──
-  const handlePrintReport = (rawReport, targetSection = null) => {
-    const report = normalizeReport(rawReport);
-    const dayLabel = report.day || '';
-    const zones = ['zone_a', 'zone_b', 'zone_c'];
-    const zoneNames = { zone_a: 'زون A', zone_b: 'زون B', zone_c: 'زون C' };
-
-    // Section 1: Basics
-    let basicsRows = '';
-    const basicsLabels = {
-      varnish: 'وارنيش', granite_granules: 'حبيبات كرانيت',
-      brown_paint: 'صبغ لون جوزي', gray_base: 'أساس رصاصي',
-      putty: 'معجون', primer: 'برايمر', roller: 'رولة'
-    };
-    Object.entries(report.basics || {}).forEach(([key, item]) => {
-      if (key === 'notes' || key === 'section_notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
-      basicsRows += `<tr><td>${basicsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
-    });
-
-    // Section 2: Marble
-    let marbleRows = '';
-    let totalWhiteSkiliat = 0, totalBrownSkiliat = 0;
-    let totalWhiteLoose = 0, totalBrownLoose = 0;
-    let netWhite = 0, netBrown = 0;
-
-    zones.forEach(zone => {
-      const w = report.marble?.[zone]?.white || {};
-      const b = report.marble?.[zone]?.brown || {};
-      
-      const wSkiliat = parseInt(w.skiliat) || 0;
-      const wLoose = parseInt(w.loose) || 0;
-      const wTotal = parseInt(w.total) || 0;
-
-      const bSkiliat = parseInt(b.skiliat) || 0;
-      const bLoose = parseInt(b.loose) || 0;
-      const bTotal = parseInt(b.total) || 0;
-
-      totalWhiteSkiliat += wSkiliat;
-      totalWhiteLoose += wLoose;
-      netWhite += wTotal;
-
-      totalBrownSkiliat += bSkiliat;
-      totalBrownLoose += bLoose;
-      netBrown += bTotal;
-
-      marbleRows += `
-        <tr>
-          <td rowspan="2" style="vertical-align:middle;font-weight:700;background:#f8f9fa;">${zoneNames[zone]}</td>
-          <td>مرمر أبيض</td>
-          <td style="text-align:center">${wSkiliat}</td>
-          <td style="text-align:center">${w.pieces_per_skilia || 198}</td>
-          <td style="text-align:center">${wLoose}</td>
-          <td style="text-align:center;font-weight:700;">${wTotal.toLocaleString()}</td>
-        </tr>
-        <tr>
-          <td style="color:#b45309;">مرمر جوزي</td>
-          <td style="text-align:center">${bSkiliat}</td>
-          <td style="text-align:center">${b.pieces_per_skilia || 198}</td>
-          <td style="text-align:center">${bLoose}</td>
-          <td style="text-align:center;font-weight:700;color:#b45309;">${bTotal.toLocaleString()}</td>
-        </tr>`;
-    });
-
-    marbleRows += `
-      <tr style="background:#1a1a2e;font-weight:800;border-top:2px solid #1a1a2e;">
-        <td colspan="2" style="text-align:left;padding-right:15px;color:#fff;">الإجمالي التراكمي / المجموع الكلي:</td>
-        <td style="text-align:center;direction:ltr;color:#fff;">W: ${totalWhiteSkiliat}<br/><span style="color:#f59e0b;">B: ${totalBrownSkiliat}</span></td>
-        <td style="text-align:center;color:#888;">-</td>
-        <td style="text-align:center;direction:ltr;color:#fff;">W: ${totalWhiteLoose}<br/><span style="color:#f59e0b;">B: ${totalBrownLoose}</span></td>
-        <td style="text-align:center;direction:ltr;color:#fff;">W: ${netWhite.toLocaleString()}<br/><span style="color:#f59e0b;">B: ${netBrown.toLocaleString()}</span></td>
-      </tr>
-    `;
-
-    // Section 3: Sealants
-    let sealantsRows = '';
-    const sealantsLabels = {
-      beige_paint: 'صوصج بيجي', white_paint: 'صوصج أبيض',
-      primer: 'برايمر', tape: 'تيب لاصق',
-      sponge_1cm: 'حبل اسفنجي 1 سم', sponge_2cm: 'حبل اسفنجي 2 سم', sponge_3cm: 'حبل اسفنجي 3 سم'
-    };
-    Object.entries(report.sealants || {}).forEach(([key, item]) => {
-      if (key === 'notes' || key === 'section_notes' || key.endsWith('_notes') || !item || typeof item !== 'object') return;
-      sealantsRows += `<tr><td>${sealantsLabels[key] || key}</td><td style="text-align:center">${item.pulled || '-'}</td><td style="text-align:center">${item.remaining || '-'}</td></tr>`;
-    });
-
-    // Section titles and filters
-    const docTitle = targetSection === 'basics' ? 'جرد الماربلكس والمواد الأساسية'
-      : targetSection === 'marble' ? 'جرد ورصيد المرمر'
-      : targetSection === 'sealants' ? 'جرد المواد العازلة والصوصج'
-      : targetSection === 'bulk' ? 'جرد المواد السائبة والإسفنج'
-      : 'تقرير جرد واستهلاك المواد اليومي (الكامل)';
-
-    const showBasics   = !targetSection || targetSection === 'basics';
-    const showMarble   = !targetSection || targetSection === 'marble';
-    const showSealants = !targetSection || targetSection === 'sealants';
-    const showBulk     = !targetSection || targetSection === 'bulk';
-
-    const html = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${docTitle} - ${report.date}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      font-family: 'Cairo', sans-serif;
-      color: #1a1a2e;
-      background: #ffffff;
-      direction: rtl;
-      font-size: 10.5pt;
-      line-height: 1.6;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    .page {
-      width: 210mm;
-      min-height: 297mm;
-      margin: 0 auto;
-      padding: 12mm 15mm;
-      background: #fff;
-    }
-    .report-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #1a1a2e;
-      margin-bottom: 16px;
-    }
-    .header-org { display: flex; align-items: center; gap: 12px; }
-    .org-text h1 { font-size: 14pt; font-weight: 900; color: #1a1a2e; }
-    .org-text p { font-size: 9pt; color: #555; margin-top: 2px; }
-    .header-meta { text-align: left; font-size: 9pt; color: #444; }
-    .header-meta .doc-title { font-size: 12pt; font-weight: 800; color: #1a1a2e; margin-bottom: 4px; }
-    .meta-badge {
-      display: inline-block; background: #f59e0b; color: #fff;
-      font-weight: 700; padding: 2px 10px; border-radius: 20px; font-size: 8.5pt; margin-bottom: 4px;
-    }
-    .info-bar {
-      display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
-      border: 1.5px solid #d0d0d8; border-radius: 8px; overflow: hidden; margin-bottom: 18px;
-    }
-    .info-cell { padding: 6px 10px; border-left: 1px solid #d0d0d8; text-align: center; }
-    .info-cell:last-child { border-left: none; }
-    .info-cell .lbl { font-size: 8pt; color: #777; font-weight: 600; }
-    .info-cell .val { font-size: 10pt; font-weight: 800; color: #1a1a2e; }
-    .section { margin-bottom: 18px; }
-    .section-title {
-      font-size: 11pt; font-weight: 800; color: #fff; background: #1a1a2e;
-      padding: 6px 12px; border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 8px;
-    }
-    .section-title .num {
-      background: #f59e0b; color: #1a1a2e; border-radius: 50%; width: 20px; height: 20px;
-      display: inline-flex; align-items: center; justify-content: center; font-size: 9.5pt; font-weight: 900;
-    }
-    table { width: 100%; border-collapse: collapse; font-size: 10pt; border: 1.5px solid #d0d0d8; }
-    th { background: #f0f0f5; font-weight: 700; color: #333; padding: 6px 10px; border: 1px solid #d0d0d8; text-align: right; }
-    td { padding: 6px 10px; border: 1px solid #e0e0e8; color: #1a1a2e; }
-    tbody tr:nth-child(even) { background: #fafafa; }
-    .bulk-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border: 1.5px solid #d0d0d8; border-top: none; }
-    .bulk-cell { padding: 8px 12px; border-left: 1px solid #d0d0d8; text-align: center; }
-    .bulk-cell:last-child { border-left: none; }
-    .bulk-cell .bc-lbl { font-size: 8.5pt; color: #777; font-weight: 600; }
-    .bulk-cell .bc-val { font-size: 11pt; font-weight: 800; color: #1a1a2e; margin-top: 2px; }
-    .notes-box {
-      border: 1.5px solid #f59e0b; border-radius: 0 0 6px 6px; padding: 8px 12px;
-      background: #fffbeb; border-top: none; margin-top: 4px;
-    }
-    .notes-box .section-label { font-size: 8.5pt; color: #b45309; font-weight: 800; margin-bottom: 3px; }
-    .notes-box p { font-size: 9.5pt; color: #333; line-height: 1.5; font-style: italic; white-space: pre-line; }
-    .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 25px; padding-top: 15px; border-top: 2px dashed #bbb; }
-    .sig-box { border: 1px solid #ccc; border-radius: 8px; padding: 10px; text-align: center; }
-    .sig-box .sig-title { font-size: 9.5pt; font-weight: 800; color: #1a1a2e; margin-bottom: 6px; }
-    .sig-box .sig-line { border-top: 1px solid #999; margin: 22px 8px 4px; padding-top: 4px; font-size: 8pt; color: #888; }
-    .report-footer { margin-top: 20px; padding-top: 8px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; font-size: 8pt; color: #aaa; }
-    @media print {
-      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .page { width: 100%; padding: 8mm 12mm; }
-    }
-  </style>
-</head>
-<body>
-  <div class="page">
-    <div class="report-header">
-      <div class="header-org">
-        <div style="width: 60px; height: 60px;">
-          <img src="https://mvco-iq.com/wp-content/uploads/2024/10/cropped-2color_logo.webp" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;"/>
-        </div>
-        <div class="org-text">
-          <h1>متابعة موقع الجندي المجهول</h1>
-          <p>شركة رؤية الحداثة للخدمات الهندسية والاستثمار العقاري</p>
-        </div>
-      </div>
-      <div class="header-meta">
-        <div class="doc-title">${docTitle}</div>
-        <div class="meta-badge">وثيقة رسمية معتمدة</div><br/>
-        <span>التاريخ: <strong>${report.date}</strong></span> &nbsp;|&nbsp;
-        <span>اليوم: <strong>${dayLabel}</strong></span>
-      </div>
-    </div>
-
-    <div class="info-bar">
-      <div class="info-cell"><div class="lbl">التاريخ</div><div class="val">${report.date}</div></div>
-      <div class="info-cell"><div class="lbl">اليوم</div><div class="val">${dayLabel}</div></div>
-      <div class="info-cell"><div class="lbl">وقت المباشرة</div><div class="val">${report.start_time || '-'}</div></div>
-      <div class="info-cell"><div class="lbl">وقت الانتهاء</div><div class="val">${report.end_time || '-'}</div></div>
-      <div class="info-cell"><div class="lbl">معد التقرير</div><div class="val">${report.prepared_by || '-'}</div></div>
-    </div>
-
-    ${showBasics ? `
-    <div class="section">
-      <div class="section-title"><span class="num">1</span> الماربلكس والمواد الأساسية</div>
-      <table>
-        <thead><tr><th style="width:50%">المادة</th><th style="width:25%;text-align:center">الكمية المسحوبة</th><th style="width:25%;text-align:center">الكمية المتبقية</th></tr></thead>
-        <tbody>${basicsRows || '<tr><td colspan="3" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
-      </table>
-      ${report.basics_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد الأساسية</div><p>${report.basics_notes}</p></div>` : ''}
-    </div>` : ''}
-
-    ${showMarble ? `
-    <div class="section">
-      <div class="section-title"><span class="num">2</span> جرد المرمر (حسب الزون واللون)</div>
-      <table>
-        <thead><tr><th>الزون</th><th>النوع</th><th style="text-align:center">عدد السكيبات</th><th style="text-align:center">قطع/سكيبة</th><th style="text-align:center">الفرط</th><th style="text-align:center">المجموع</th></tr></thead>
-        <tbody>${marbleRows || '<tr><td colspan="6" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
-      </table>
-      ${report.marble_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المرمر</div><p>${report.marble_notes}</p></div>` : ''}
-    </div>` : ''}
-
-    ${showSealants ? `
-    <div class="section">
-      <div class="section-title"><span class="num">3</span> جرد الصوصج والمواد العازلة</div>
-      <table>
-        <thead><tr><th style="width:50%">المادة</th><th style="width:25%;text-align:center">الكمية المسحوبة</th><th style="width:25%;text-align:center">الكمية المتبقية</th></tr></thead>
-        <tbody>${sealantsRows || '<tr><td colspan="3" style="text-align:center;color:#aaa;">لا بيانات</td></tr>'}</tbody>
-      </table>
-      ${report.sealants_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد العازلة</div><p>${report.sealants_notes}</p></div>` : ''}
-    </div>` : ''}
-
-    ${showBulk ? `
-    <div class="section">
-      <div class="section-title"><span class="num">4</span> المواد السائبة (أسمنت ورمل وفوم)</div>
-      <div class="bulk-grid">
-        <div class="bulk-cell"><div class="bc-lbl">كمية الأسمنت</div><div class="bc-val">${report.bulk?.cement || '-'}</div></div>
-        <div class="bulk-cell"><div class="bc-lbl">كمية الرمل</div><div class="bc-val">${report.bulk?.sand || '-'}</div></div>
-        <div class="bulk-cell"><div class="bc-lbl">الفوم (مسحوب / متبقي)</div><div class="bc-val">${report.bulk?.foam?.pulled || '-'} / ${report.bulk?.foam?.remaining || '-'}</div></div>
-      </div>
-      ${report.bulk_notes ? `<div class="notes-box"><div class="section-label">ملاحظات وتحديثات قسم المواد السائبة</div><p>${report.bulk_notes}</p></div>` : ''}
-    </div>` : ''}
-
-    ${(!targetSection && report.notes) ? `
-    <div class="notes-box" style="border-color:#1a1a2e;background:#f8f9fa;">
-      <div class="section-label" style="color:#1a1a2e;">ملاحظات وتحديثات الاستهلاك العامة:</div>
-      <p style="font-style:normal;">${report.notes}</p>
-    </div>` : ''}
-
-    ${(report.site_images && report.site_images.length > 0) ? `
-    <div style="margin-top:15px;page-break-inside:avoid;">
-      <div class="section-title" style="background:#1a1a2e;color:#fff;">📸 التوثيق الميداني بالصور</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px;border:1.5px solid #d0d0d8;border-top:none;background:#fafafa;">
-        ${report.site_images.map(imgUrl => `
-          <div style="border:1px solid #ccc;border-radius:4px;overflow:hidden;height:110px;background:#eee;">
-            <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;" />
-          </div>
-        `).join('')}
-      </div>
-    </div>` : ''}
-
-    <div class="signatures">
-      <div class="sig-box"><div class="sig-title">مشرف الموقع</div><div class="sig-line">التوقيع والتاريخ</div></div>
-      <div class="sig-box"><div class="sig-title">المعاون الفني</div><div class="sig-line">التوقيع والتاريخ</div></div>
-      <div class="sig-box"><div class="sig-title">معد التقرير</div><div class="sig-line">${report.prepared_by || 'علي حاتم'}</div></div>
-    </div>
-
-    <div class="report-footer">
-      <span>متابعة موقع الجندي المجهول - شركة رؤية الحداثة للخدمات الهندسية</span>
-      <span>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</span>
-    </div>
-  </div>
-  <script>
-    window.onload = function() {
-      setTimeout(function() { window.print(); }, 500);
-    };
-  <\/script>
-</body>
-</html>`;
-
-    const win = window.open('', '_blank', 'width=900,height=1100');
-    if (win) {
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
+  const openNew = () => {
+    setSubmitError('');
+    setEditingId(null);
+    if (reports.length > 0) {
+      // A new count starts from the latest one; changes are logged on save.
+      const base = normalizeReport(reports[0]);
+      const today = isoDay();
+      setFormData({ ...clone(base), id: undefined, created_at: undefined, date: today, day: dayFor(today) });
+      setOriginal(clone(base));
+      setIsCloned(true);
     } else {
-      const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'fixed';
-      printFrame.style.top = '-1000px';
-      printFrame.style.left = '-1000px';
-      printFrame.style.width = '1px';
-      printFrame.style.height = '1px';
-      printFrame.style.border = 'none';
-      document.body.appendChild(printFrame);
-
-      const frameDoc = printFrame.contentWindow.document;
-      frameDoc.open();
-      frameDoc.write(html);
-      frameDoc.close();
-
-      setTimeout(() => {
-        try {
-          printFrame.contentWindow.focus();
-          printFrame.contentWindow.print();
-        } catch (err) {
-          console.error(err);
-        }
-        setTimeout(() => {
-          if (document.body.contains(printFrame)) {
-            document.body.removeChild(printFrame);
-          }
-        }, 10000);
-      }, 500);
-    }
-  };
-
-  // 2. Load draft from localStorage on switching to Form Mode
-  useEffect(() => {
-    if (viewMode === 'form' && !isEditingId && !isCloned) {
-      const savedDraft = localStorage.getItem('materials_consumption_draft');
-      if (savedDraft) {
-        try {
-          const parsed = JSON.parse(savedDraft);
-          // Set draft, keeping date fresh if it was default
-          setFormData({
-            ...parsed,
-            date: parsed.date || new Date().toISOString().split('T')[0]
-          });
-          setHasRestoredDraft(true);
-          setTimeout(() => setHasRestoredDraft(false), 4000);
-        } catch (e) {
-          console.error('Failed to parse draft', e);
-        }
-      }
-    }
-  }, [viewMode, isEditingId, isCloned]);
-
-  // 3. Auto-save form changes to localStorage
-  useEffect(() => {
-    if (viewMode === 'form' && !isEditingId) {
-      const timeoutId = setTimeout(() => {
-        localStorage.setItem('materials_consumption_draft', JSON.stringify(formData));
-        setShowAutoSaveIndicator(true);
-        setTimeout(() => setShowAutoSaveIndicator(false), 2000);
-      }, 500);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [formData, viewMode, isEditingId]);
-
-  // 4. Calculate zone and cumulative totals dynamically
-  const calculateTotals = (currentData) => {
-    const updated = { ...currentData };
-    const zones = ['zone_a', 'zone_b', 'zone_c'];
-    
-    zones.forEach(zone => {
-      ['white', 'brown'].forEach(color => {
-        const zoneData = updated.marble[zone][color];
-        const skiliat = parseInt(zoneData.skiliat) || 0;
-        const pcsPerSkilia = parseInt(zoneData.pieces_per_skilia) || 0;
-        const loose = parseInt(zoneData.loose) || 0;
-        updated.marble[zone][color].total = (skiliat * pcsPerSkilia) + loose;
-      });
-    });
-    
-    return updated;
-  };
-
-  const handleFieldChange = (section, item, field, value) => {
-    setFormData(prev => {
-      let nextState = { ...prev };
-      if (section === 'basics' || section === 'sealants') {
-        nextState[section][item][field] = value;
-      } else if (section === 'bulk') {
-        if (item === 'foam') {
-          nextState.bulk.foam[field] = value;
-        } else {
-          nextState.bulk[item] = value;
-        }
-      } else if (section === 'marble') {
-        nextState.marble[item][field][value] = arguments[4]; // handles (marble, zone, color, subfield, val)
+      const draft = readDraft();
+      if (draft) {
+        setFormData({ ...draft, date: draft.date || isoDay() });
+        toast.info(t('hasDraftLoaded'));
       } else {
-        nextState[section] = value;
+        const today = isoDay();
+        setFormData({ ...clone(INITIAL_FORM_STATE), date: today, day: dayFor(today), prepared_by: user?.name || '' });
       }
-      return section === 'marble' ? calculateTotals(nextState) : nextState;
-    });
+      setOriginal(null);
+      setIsCloned(false);
+    }
+    setMode('form');
+    window.scrollTo({ top: 0 });
   };
 
-  // Specialized change handler for marble sub-fields
-  const handleMarbleChange = (zone, color, subField, val) => {
-    setFormData(prev => {
-      const nextState = JSON.parse(JSON.stringify(prev)); // Deep copy
-      nextState.marble[zone][color][subField] = val;
-      return calculateTotals(nextState);
-    });
+  const openEdit = (report) => {
+    const norm = normalizeReport(report);
+    setSubmitError('');
+    setFormData(clone(norm));
+    setOriginal(clone(norm));
+    setEditingId(report.id);
+    setIsCloned(false);
+    setViewing(null);
+    setMode('form');
+    window.scrollTo({ top: 0 });
   };
 
-  // 5. Submit Form
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+  const openClone = (report) => {
+    const norm = normalizeReport(report);
+    const today = isoDay();
+    setSubmitError('');
+    setFormData({ ...clone(norm), id: undefined, created_at: undefined, date: today, day: dayFor(today) });
+    setOriginal(clone(norm));
+    setEditingId(null);
+    setIsCloned(true);
+    setViewing(null);
+    setMode('form');
+    window.scrollTo({ top: 0 });
+  };
+
+  const backToHistory = () => {
+    setEditingId(null);
+    setIsCloned(false);
+    setMode('history');
+    window.scrollTo({ top: 0 });
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
     setSubmitError('');
 
-    const submitData = JSON.parse(JSON.stringify(formData));
+    const data = clone(formData);
+    // Section notes are also embedded in the JSON columns so every backend keeps them.
+    data.basics = { ...(data.basics || {}), section_notes: data.basics_notes || '' };
+    data.marble = { ...(data.marble || {}), section_notes: data.marble_notes || '' };
+    data.sealants = { ...(data.sealants || {}), section_notes: data.sealants_notes || '' };
+    data.bulk = { ...(data.bulk || {}), section_notes: data.bulk_notes || '' };
 
-    // Embed section notes inside JSONB objects so Supabase saves them safely
-    submitData.basics = submitData.basics || {};
-    submitData.basics.section_notes = submitData.basics_notes || '';
-
-    submitData.marble = submitData.marble || {};
-    submitData.marble.section_notes = submitData.marble_notes || '';
-
-    submitData.sealants = submitData.sealants || {};
-    submitData.sealants.section_notes = submitData.sealants_notes || '';
-
-    submitData.bulk = submitData.bulk || {};
-    submitData.bulk.section_notes = submitData.bulk_notes || '';
-
-    if (originalDataForEdit) {
-      const diffList = getDifferencesList(submitData, originalDataForEdit);
-      if (diffList.length > 0) {
-        const plainTextDiffs = diffList.map(item => {
-           let text = item.replace(/<li>/g, '- ').replace(/<\/li>/g, '');
-           text = text.replace(/<strong>(.*?)<\/strong>/g, '$1');
-           text = text.replace(/&larr;/g, '->');
-           text = text.replace(/<[^>]+>/g, '');
-           return text.trim();
-        }).join('\n');
-        
-        const timestamp = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-        submitData.notes = (submitData.notes ? submitData.notes + '\n\n' : '') + 
-                           `--- تحديثات الاستهلاك / التعديلات (${submitData.date}) ---\n` + plainTextDiffs;
+    if (original) {
+      const diffs = getDifferences(data, original);
+      if (diffs.length > 0) {
+        data.notes = `${data.notes ? `${data.notes}\n\n` : ''}--- تحديثات الاستهلاك / التعديلات (${data.date}) ---\n${diffs.join('\n')}`;
       }
     }
 
     try {
-      const method = isEditingId ? 'PUT' : 'POST';
-      const url = isEditingId 
-        ? `/api/materials-consumption/${isEditingId}` 
-        : '/api/materials-consumption';
-
-      const res = await apiFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submitData)
+      const res = await apiFetch(editingId ? `/api/materials-consumption/${editingId}` : '/api/materials-consumption', {
+        method: editingId ? 'PUT' : 'POST',
+        body: JSON.stringify(data),
       });
-
-      if (res.ok) {
-        if (!isEditingId) {
-          // Clear draft on successful creation
-          localStorage.removeItem('materials_consumption_draft');
-        }
-        setFormData(INITIAL_FORM_STATE);
-        setOriginalDataForEdit(null);
-        setIsEditingId(null);
-        setIsCloned(false);
-        setViewMode('history');
-        fetchReports();
-      } else {
-        const errorData = await res.json();
-        setSubmitError(errorData.error || 'Failed to submit the report');
-      }
+      if (!res.ok) throw new Error(await apiErrorMessage(res, isAr ? 'تعذر حفظ التقرير.' : 'Could not save the report.'));
+      if (!editingId) clearDraft();
+      toast.success(editingId ? (isAr ? 'تم تحديث التقرير' : 'Report updated') : (isAr ? 'تم حفظ التقرير' : 'Report saved'));
+      setFormData(INITIAL_FORM_STATE);
+      setOriginal(null);
+      backToHistory();
+      fetchReports();
     } catch (err) {
-      console.error(err);
-      setSubmitError('Server connection error. Please try again.');
+      setSubmitError(err.message || (isAr ? 'تعذر الاتصال بالخادم.' : 'Could not reach the server.'));
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  // 6. Delete Report
-  const confirmDeleteReport = async () => {
-    if (!reportToDelete) return;
-    const id = reportToDelete.id;
-    setDeletingReportId(id);
+  const confirmDelete = async () => {
+    if (!toDelete) return;
     try {
-      const res = await apiFetch(`/api/materials-consumption/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchReports();
-        setReportToDelete(null);
-      }
+      const res = await apiFetch(`/api/materials-consumption/${toDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, isAr ? 'تعذر حذف التقرير.' : 'Could not delete the report.'));
+      toast.success(isAr ? 'تم حذف التقرير' : 'Report deleted');
+      setToDelete(null);
+      setViewing(null);
+      fetchReports();
     } catch (err) {
-      console.error('Error deleting materials report:', err);
-    } finally {
-      setDeletingReportId(null);
+      toast.error(err.message);
     }
   };
 
-  // 7. Edit Setup
-  const handleEdit = (report) => {
-    const norm = normalizeReport(report);
-    setFormData(norm);
-    setOriginalDataForEdit(JSON.parse(JSON.stringify(norm)));
-    setIsEditingId(report.id);
-    setIsCloned(false);
-    setViewMode('form');
-  };
+  const print = (report, section) => openReport(buildConsumptionReport(normalizeReport(report), section, t, lang), {
+    title: section ? SECTION_TITLES[section][isAr ? 'ar' : 'en'] : (isAr ? 'تقرير جرد واستهلاك المواد' : 'Daily materials report'),
+  });
 
-  // 8. Clone/Copy Setup
-  const handleClone = (report) => {
-    const norm = normalizeReport(report);
-    const todayDate = new Date().toISOString().split('T')[0];
-    const dayOfWeekIndex = new Date().getDay();
-    const todayDayArabic = DAYS_OF_WEEK.ar[dayOfWeekIndex];
+  if (mode === 'form') {
+    return (
+      <ConsumptionForm
+        formData={formData}
+        setFormData={setFormData}
+        editingId={editingId}
+        isCloned={isCloned}
+        saving={saving}
+        submitError={submitError}
+        draftSaved={draftSaved}
+        t={t}
+        lang={lang}
+        onBack={backToHistory}
+        onSubmit={submit}
+        onPrint={(section) => print(formData, section)}
+        onClear={() => setConfirmClear(true)}
+        confirmClear={confirmClear}
+        onConfirmClear={() => {
+          const today = isoDay();
+          setFormData({ ...clone(INITIAL_FORM_STATE), date: today, day: dayFor(today), prepared_by: user?.name || '' });
+          setOriginal(null);
+          setIsCloned(false);
+          clearDraft();
+          setConfirmClear(false);
+        }}
+        onCancelClear={() => setConfirmClear(false)}
+      />
+    );
+  }
 
-    setFormData({
-      ...norm,
-      id: undefined, // Clear ID so it saves as new
-      date: todayDate,
-      day: todayDayArabic,
-      created_at: undefined
-    });
-    setOriginalDataForEdit(JSON.parse(JSON.stringify(norm)));
-    setIsEditingId(null);
-    setIsCloned(true);
-    setViewMode('form');
-  };
-
-  // Cumulative Sums computed from current form data
-  const getCumulativeTotals = () => {
-    const zones = ['zone_a', 'zone_b', 'zone_c'];
-    let totalWhiteSkiliat = 0, totalBrownSkiliat = 0;
-    let totalWhiteLoose = 0, totalBrownLoose = 0;
-    let netWhite = 0, netBrown = 0;
-
-    zones.forEach(zone => {
-      const w = formData.marble[zone].white;
-      const b = formData.marble[zone].brown;
-
-      totalWhiteSkiliat += parseInt(w.skiliat) || 0;
-      totalBrownSkiliat += parseInt(b.skiliat) || 0;
-      totalWhiteLoose += parseInt(w.loose) || 0;
-      totalBrownLoose += parseInt(b.loose) || 0;
-      netWhite += w.total || 0;
-      netBrown += b.total || 0;
-    });
-
-    return {
-      totalWhiteSkiliat,
-      totalBrownSkiliat,
-      totalWhiteLoose,
-      totalBrownLoose,
-      netWhite,
-      netBrown
-    };
-  };
-
-  const cumulative = getCumulativeTotals();
-
-  // Helper to translate Arabic days
-  const getDayTranslation = (dayName) => {
-    const idx = DAYS_OF_WEEK.ar.indexOf(dayName);
-    return idx !== -1 ? DAYS_OF_WEEK[lang][idx] : dayName;
-  };
+  if (loading && reports.length === 0) return <LoadingBlock label={t('loading')} />;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', width: '100%' }}>
-      <div className="screen-only-view" style={{ gridColumn: 'span 12', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        
-        {/* Header controls (Bento Card) */}
-        <motion.div 
-          className="glass-panel"
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', padding: '1.5rem' }}
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
+    <div className="stack">
+      <section className="card">
+        <div className="card-header card-header--divided">
           <div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-              <Sparkles size={24} style={{ color: 'var(--accent)' }} />
-              {t('headerMaterialsConsumptionTitle')}
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '4px', marginBottom: 0 }}>
-              {t('headerMaterialsConsumptionSubtitle')}
+            <h2 className="card-title">{t('reportHistory')}</h2>
+            <p className="card-subtitle">
+              <span className="num">{reports.length}</span> {isAr ? 'تقرير جرد يومي' : 'daily counts'}
+              {reports[0] && <> · {isAr ? 'آخرها' : 'latest'} {fmtDate(reports[0].date, lang)}</>}
             </p>
           </div>
+          {editable && (
+            <button type="button" className="btn btn--primary" onClick={openNew}>
+              <Plus size={18} aria-hidden="true" />
+              {isAr ? 'جرد جديد' : 'New count'}
+            </button>
+          )}
+        </div>
 
-          <div>
-            {viewMode === 'history' ? (
-              <button 
-                className="btn btn-primary"
-                onClick={() => {
-                  if (reports && reports.length > 0) {
-                    handleClone(reports[0]);
-                  } else {
-                    setFormData(INITIAL_FORM_STATE);
-                    setIsEditingId(null);
-                    setIsCloned(false);
-                    setViewMode('form');
-                  }
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
-              >
-                <Plus size={18} />
-                {t('addNewReport')}
-              </button>
-            ) : (
-              <button 
-                className="btn btn-secondary"
-                onClick={() => {
-                  setIsEditingId(null);
-                  setIsCloned(false);
-                  setViewMode('history');
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}
-              >
-                {lang === 'ar' ? <ArrowRight size={18} /> : <ArrowLeft size={18} />}
-                {t('backToHistory')}
+        {reports.length === 0 ? (
+          <EmptyState
+            icon={PackageOpen}
+            title={t('noReportsYet')}
+            text={isAr ? 'سجّل جرد اليوم الأول لبدء متابعة الاستهلاك والأرصدة.' : 'Record the first daily count to start tracking stock.'}
+            action={editable && (
+              <button type="button" className="btn btn--primary" onClick={openNew}>
+                <Plus size={18} aria-hidden="true" />
+                {isAr ? 'جرد جديد' : 'New count'}
               </button>
             )}
-          </div>
-        </motion.div>
-
-        <AnimatePresence mode="wait">
-          {viewMode === 'history' ? (
-            <motion.div 
-              key="history"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              className="glass-panel"
-              style={{ width: '100%', padding: '0', overflow: 'hidden' }}
-            >
-              <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: '700', margin: 0 }}>
-                  {t('reportHistory')}
-                </h3>
-              </div>
-
-            {loading && reports.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
-                {t('loading')}
-              </div>
-            ) : reports.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-                <FileText size={48} style={{ opacity: 0.4 }} />
-                <span>{t('noReportsYet')}</span>
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: '15%' }}>{t('materialsReportDate')}</th>
-                      <th style={{ width: '10%' }}>{t('materialsReportDay')}</th>
-                      <th style={{ width: '15%' }}>{t('materialsReportStartTime')} - {t('materialsReportEndTime')}</th>
-                      <th style={{ width: '15%' }}>{t('materialsReportPreparedBy')}</th>
-                      <th style={{ width: '25%' }}>{t('totalPieces')}</th>
-                      <th style={{ width: '20%', textAlign: 'center' }}>{t('edit')} / {t('deleteReport')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reports.map((report) => {
-                      // Sum total marble pieces in report
-                      let rWhite = 0, rBrown = 0;
-                      ['zone_a', 'zone_b', 'zone_c'].forEach(z => {
-                        rWhite += report.marble?.[z]?.white?.total || 0;
-                        rBrown += report.marble?.[z]?.brown?.total || 0;
-                      });
-
-                      const isExpanded = expandedReportId === report.id;
-
-                      return (
-                        <React.Fragment key={report.id}>
-                          <tr 
-                            onClick={() => setExpandedReportId(isExpanded ? null : report.id)}
-                            style={{ cursor: 'pointer' }}
-                          >
-                            <td style={{ fontWeight: '700', fontFamily: 'var(--font-english)' }}>
-                              {report.date}
-                            </td>
-                            <td>{getDayTranslation(report.day)}</td>
-                            <td style={{ fontFamily: 'var(--font-english)' }}>
-                              {report.start_time} - {report.end_time}
-                            </td>
-                            <td style={{ fontWeight: '500' }}>{report.prepared_by}</td>
-                            <td>
-                              <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>
-                                {lang === 'ar' ? `المجموع: ${rWhite + rBrown}` : `Total: ${rWhite + rBrown}`}
-                              </div>
-                              <div style={{ fontSize: '0.8rem', color: '#ccc', marginTop: '4px' }}>
-                                {lang === 'ar' 
-                                  ? `أبيض: ${rWhite} (سيكبة ${Math.floor(rWhite / 198)} | مفرط ${rWhite % 198})`
-                                  : `White: ${rWhite} (Pallets ${Math.floor(rWhite / 198)} | Loose ${rWhite % 198})`}
-                              </div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--accent)', marginTop: '2px' }}>
-                                {lang === 'ar' 
-                                  ? `جوزي: ${rBrown} (سيكبة ${Math.floor(rBrown / 198)} | مفرط ${rBrown % 198})`
-                                  : `Brown: ${rBrown} (Pallets ${Math.floor(rBrown / 198)} | Loose ${rBrown % 198})`}
-                              </div>
-                            </td>
-                            <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
-                                <button 
-                                  className="btn btn-secondary" 
-                                  onClick={() => handlePrintReport(report)}
-                                  title={lang === 'ar' ? 'طباعة التقرير PDF' : 'Print report PDF'}
-                                  style={{ padding: '6px 10px', minWidth: 'auto', minHeight: 'auto', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)' }}
-                                >
-                                  <Printer size={14} />
-                                </button>
-                                <button 
-                                  className="btn btn-secondary" 
-                                  onClick={() => handleClone(report)}
-                                  title={lang === 'ar' ? 'نسخ كتقرير جديد' : 'Clone as new report'}
-                                  style={{ padding: '6px 10px', minWidth: 'auto', minHeight: 'auto', background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6' }}
-                                >
-                                  <Copy size={14} />
-                                </button>
-                                <button 
-                                  className="btn btn-secondary" 
-                                  onClick={() => handleEdit(report)}
-                                  title={lang === 'ar' ? 'تعديل التقرير الحالي' : 'Edit report'}
-                                  style={{ padding: '6px 10px', minWidth: 'auto', minHeight: 'auto' }}
-                                >
-                                  <Edit2 size={14} />
-                                </button>
-                                {(user.role === 'admin' || user.role === 'super_admin') && (
-                                  <button 
-                                    className="btn btn-secondary" 
-                                    onClick={() => setReportToDelete(report)}
-                                    title={lang === 'ar' ? 'حذف' : 'Delete'}
-                                    style={{ padding: '6px 10px', minWidth: 'auto', minHeight: 'auto', background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)', color: 'var(--danger)' }}
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-
-                          {/* Expanded Details Row */}
-                          {isExpanded && (
-                            <tr style={{ background: 'rgba(0, 0, 0, 0.15)' }}>
-                              <td colSpan="6" style={{ padding: '1.5rem', cursor: 'default' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-                                  
-                                  {/* Basics details */}
-                                  <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
-                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <Layers size={18} />
-                                        {t('sectionBasics')}
-                                      </h4>
-                                      <button
-                                        className="btn btn-secondary"
-                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'basics'); }}
-                                        title={lang === 'ar' ? 'طباعة قسم الأساسيات' : 'Print Basics'}
-                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
-                                      >
-                                        <Printer size={12} />
-                                        PDF
-                                      </button>
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                      {Object.entries(report.basics || {}).map(([key, item]) => (
-                                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
-                                          <span style={{ fontWeight: '500' }}>{t(key)}</span>
-                                          <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(243, 151, 22, 0.08)', color: 'var(--accent)', fontWeight: '600' }}>
-                                              {t('materialPulled')}: {item.pulled || 0}
-                                            </span>
-                                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(22, 163, 74, 0.08)', color: 'var(--success)', fontWeight: '600' }}>
-                                              {t('materialRemaining')}: {item.remaining || 0}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ))}
-                                      {report.basics_notes && (
-                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
-                                          <strong>ملاحظات الأساسيات:</strong> {report.basics_notes}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Sealants details */}
-                                  <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
-                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <Sparkles size={18} />
-                                        {t('sectionSealants')}
-                                      </h4>
-                                      <button
-                                        className="btn btn-secondary"
-                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'sealants'); }}
-                                        title={lang === 'ar' ? 'طباعة قسم العوازل' : 'Print Sealants'}
-                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
-                                      >
-                                        <Printer size={12} />
-                                        PDF
-                                      </button>
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                      {Object.entries(report.sealants || {}).map(([key, item]) => (
-                                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
-                                          <span style={{ fontWeight: '500' }}>{t(key)}</span>
-                                          <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(243, 151, 22, 0.08)', color: 'var(--accent)', fontWeight: '600' }}>
-                                              {t('materialPulled')}: {item.pulled || 0}
-                                            </span>
-                                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(22, 163, 74, 0.08)', color: 'var(--success)', fontWeight: '600' }}>
-                                              {t('materialRemaining')}: {item.remaining || 0}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ))}
-                                      {report.sealants_notes && (
-                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
-                                          <strong>ملاحظات العوازل:</strong> {report.sealants_notes}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Bulk & Notes */}
-                                  <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
-                                      <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <FileText size={18} />
-                                        {lang === 'ar' ? `${t('sectionBulk')} و ${t('notes')}` : `${t('sectionBulk')} & ${t('notes')}`}
-                                      </h4>
-                                      <button
-                                        className="btn btn-secondary"
-                                        onClick={(e) => { e.stopPropagation(); handlePrintReport(report, 'bulk'); }}
-                                        title={lang === 'ar' ? 'طباعة قسم السائبة' : 'Print Bulk'}
-                                        style={{ padding: '3px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '3px' }}
-                                      >
-                                        <Printer size={12} />
-                                        PDF
-                                      </button>
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
-                                        <span style={{ fontWeight: '500' }}>{t('cementQty')}</span>
-                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--fg)', fontWeight: '600', fontFamily: 'var(--font-english)' }}>
-                                          {report.bulk?.cement || 0}
-                                        </span>
-                                      </div>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
-                                        <span style={{ fontWeight: '500' }}>{t('sandQty')}</span>
-                                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--fg)', fontWeight: '600', fontFamily: 'var(--font-english)' }}>
-                                          {report.bulk?.sand || 0}
-                                        </span>
-                                      </div>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid var(--border-soft)' }}>
-                                        <span style={{ fontWeight: '500' }}>{t('foam')}</span>
-                                        <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                          <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(243, 151, 22, 0.08)', color: 'var(--accent)', fontWeight: '600' }}>
-                                            {t('materialPulled')}: {report.bulk?.foam?.pulled || 0}
-                                          </span>
-                                          <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '4px', background: 'rgba(22, 163, 74, 0.08)', color: 'var(--success)', fontWeight: '600' }}>
-                                            {t('materialRemaining')}: {report.bulk?.foam?.remaining || 0}
-                                          </span>
-                                        </div>
-                                      </div>
-                                      {report.bulk_notes && (
-                                        <div style={{ marginTop: '0.4rem', padding: '0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem', color: 'var(--fg-2)' }}>
-                                          <strong>ملاحظات المواد السائبة:</strong> {report.bulk_notes}
-                                        </div>
-                                      )}
-                                      {report.notes && (
-                                        <div style={{ marginTop: '0.5rem', padding: '0.6rem 0.8rem', borderRadius: '6px', background: 'rgba(255,255,255,0.02)', borderLeft: lang === 'ar' ? 'none' : '3px solid var(--accent)', borderRight: lang === 'ar' ? '3px solid var(--accent)' : 'none' }}>
-                                          <div style={{ fontSize: '0.85rem', color: 'var(--accent)', marginBottom: '4px', fontWeight: '800' }}>ملاحظات وتحديثات عامة:</div>
-                                          <div style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--fg-2)', whiteSpace: 'pre-line' }}>{report.notes}</div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-
-                                  {/* Marble details (Full width spanning) */}
-                                  <div className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255, 255, 255, 0.02)', gridColumn: '1 / -1' }}>
-                                    <h4 style={{ fontSize: '1rem', fontWeight: '800', borderBottom: '1px solid var(--border)', paddingBottom: '0.6rem', marginBottom: '1rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                      <Layers size={18} />
-                                      {t('sectionMarble')}
-                                    </h4>
-                                    <div className="table-responsive" style={{ marginTop: '0', background: 'transparent', border: 'none' }}>
-                                      <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr', fontSize: '0.85rem', background: 'transparent' }}>
-                                        <thead>
-                                          <tr>
-                                            <th style={{ background: 'transparent', padding: '8px 12px', fontSize: '0.8rem' }}>{t('colZoneName')}</th>
-                                            <th style={{ background: 'transparent', padding: '8px 12px', fontSize: '0.8rem', textAlign: 'center' }}>{t('skiliatCount')}</th>
-                                            <th style={{ background: 'transparent', padding: '8px 12px', fontSize: '0.8rem', textAlign: 'center' }}>{t('piecesPerSkilia')}</th>
-                                            <th style={{ background: 'transparent', padding: '8px 12px', fontSize: '0.8rem', textAlign: 'center' }}>{t('loosePieces')}</th>
-                                            <th style={{ background: 'transparent', padding: '8px 12px', fontSize: '0.8rem', textAlign: 'center' }}>{t('totalPieces')}</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {['zone_a', 'zone_b', 'zone_c'].map((zone) => (
-                                            <React.Fragment key={zone}>
-                                              {/* White */}
-                                              <tr>
-                                                <td style={{ padding: '8px 12px', fontWeight: '600' }}>
-                                                  {(lang === 'ar' ? zone.replace('zone_', 'زون ').toUpperCase() : zone.replace('zone_', 'Zone ').toUpperCase())} - {t('marbleWhiteTitle')}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.white?.skiliat || 0}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.white?.pieces_per_skilia || 198}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.white?.loose || 0}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontWeight: '800', fontFamily: 'var(--font-english)' }}>
-                                                  {(report.marble?.[zone]?.white?.total || 0).toLocaleString()}
-                                                </td>
-                                              </tr>
-                                              {/* Brown */}
-                                              <tr style={{ borderBottom: '1px solid var(--border-soft)' }}>
-                                                <td style={{ padding: '8px 12px', color: 'var(--accent)', fontWeight: '600' }}>
-                                                  {(lang === 'ar' ? zone.replace('zone_', 'زون ').toUpperCase() : zone.replace('zone_', 'Zone ').toUpperCase())} - {t('marbleBrownTitle')}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.brown?.skiliat || 0}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.brown?.pieces_per_skilia || 198}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontFamily: 'var(--font-english)' }}>
-                                                  {report.marble?.[zone]?.brown?.loose || 0}
-                                                </td>
-                                                <td style={{ textAlign: 'center', padding: '8px 12px', fontWeight: '800', fontFamily: 'var(--font-english)', color: 'var(--accent)' }}>
-                                                  {(report.marble?.[zone]?.brown?.total || 0).toLocaleString()}
-                                                </td>
-                                              </tr>
-                                            </React.Fragment>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </div>
-
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </motion.div>
+          />
         ) : (
-          <motion.form 
-            key="form"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            onSubmit={handleSubmit}
-            style={{ gridColumn: 'span 12', display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}
-          >
-            {/* Auto-save draft notifications */}
-            {hasRestoredDraft && (
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderColor: 'var(--success)', background: 'rgba(16, 185, 129, 0.05)', padding: '0.75rem 1rem' }}>
-                <CheckCircle2 size={16} style={{ color: 'var(--success)' }} />
-                <span style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: '600' }}>
-                  {t('hasDraftLoaded')}
-                </span>
-              </div>
-            )}
-
-            {isCloned && (
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderColor: 'var(--accent)', background: 'rgba(243, 151, 22, 0.05)', padding: '0.75rem 1rem' }}>
-                <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: '0.85rem', color: 'var(--fg)', fontWeight: '600' }}>
-                  {lang === 'ar' 
-                    ? 'تم ملء النموذج تلقائياً ببيانات الجرد السابق. يمكنك التعديل عليها وحفظها كجرد جديد.' 
-                    : 'The form has been pre-filled with the previous report data. You can edit and save it as a new report.'}
-                </span>
-              </div>
-            )}
-
-            {submitError && (
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderColor: 'var(--danger)', background: 'rgba(239, 68, 68, 0.05)', padding: '0.75rem 1rem' }}>
-                <AlertCircle size={16} style={{ color: 'var(--danger)' }} />
-                <span style={{ fontSize: '0.85rem', color: 'var(--danger)', fontWeight: '600' }}>
-                  {submitError}
-                </span>
-              </div>
-            )}
-
-            {/* Header Form Cards */}
-            <div className="glass-panel" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.2rem', padding: '1.2rem' }}>
-              <div>
-                <label className="form-label">{t('materialsReportDate')}</label>
-                <input 
-                  type="date" 
-                  className="form-input"
-                  style={{ fontFamily: 'var(--font-english)' }}
-                  value={formData.date}
-                  onChange={(e) => handleFieldChange('date', null, null, e.target.value)}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="form-label">{t('materialsReportDay')}</label>
-                <select 
-                  className="form-input"
-                  value={formData.day}
-                  onChange={(e) => handleFieldChange('day', null, null, e.target.value)}
-                  required
-                >
-                  {DAYS_OF_WEEK.ar.map((day, idx) => (
-                    <option key={day} value={day}>
-                      {DAYS_OF_WEEK[lang][idx]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="form-label">{t('materialsReportStartTime')}</label>
-                <input 
-                  type="time" 
-                  className="form-input"
-                  style={{ fontFamily: 'var(--font-english)' }}
-                  value={formData.start_time}
-                  onChange={(e) => handleFieldChange('start_time', null, null, e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="form-label">{t('materialsReportEndTime')}</label>
-                <input 
-                  type="time" 
-                  className="form-input"
-                  style={{ fontFamily: 'var(--font-english)' }}
-                  value={formData.end_time}
-                  onChange={(e) => handleFieldChange('end_time', null, null, e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="form-label">{t('materialsReportPreparedBy')}</label>
-                <input 
-                  type="text" 
-                  className="form-input"
-                  value={formData.prepared_by}
-                  onChange={(e) => handleFieldChange('prepared_by', null, null, e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Low Stock Alerts Banner */}
-            {getLowStockItems(formData).length > 0 && (
-              <div className="glass-panel" style={{ padding: '1rem', borderColor: 'var(--danger)', background: 'rgba(239, 68, 68, 0.05)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: 'var(--danger)' }}>
-                  <AlertCircle size={18} />
-                  <strong style={{ fontSize: '0.95rem' }}>
-                    {lang === 'ar' ? '⚠️ تنبيهات الرصيد الحرج في المخزن (انخفاض الكمية المتبقية):' : '⚠️ Low Stock Alerts:'}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {getLowStockItems(formData).map(alert => (
-                    <span 
-                      key={alert.key} 
-                      style={{ 
-                        background: 'rgba(239, 68, 68, 0.15)', 
-                        border: '1px solid rgba(239, 68, 68, 0.3)', 
-                        color: 'var(--danger)', 
-                        padding: '3px 8px', 
-                        borderRadius: '6px', 
-                        fontSize: '0.8rem', 
-                        fontWeight: '700' 
-                      }}
-                    >
-                      {alert.name}: متبقي {alert.remaining} (الحد الأدنى {alert.threshold})
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Site Image Attachment Card */}
-            <div className="glass-panel" style={{ padding: '1.2rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                <label className="form-label" style={{ fontSize: '0.9rem', color: 'var(--accent)', fontWeight: '700', margin: 0 }}>
-                  {lang === 'ar' ? '📸 توثيق صور الموقع الميدانية (حتى 6 صور تدرج في PDF):' : '📸 Site Photos Attachment (up to 6 photos embedded in PDF):'}
-                </label>
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  multiple 
-                  id="site-image-input" 
-                  style={{ display: 'none' }} 
-                  onChange={handleImageUpload} 
-                />
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('site-image-input').click()}
-                  className="btn btn-secondary"
-                  style={{ padding: '4px 12px', fontSize: '0.8rem' }}
-                >
-                  {lang === 'ar' ? '➕ إرفاق صور' : '➕ Attach Photos'}
-                </button>
-              </div>
-
-              {formData.site_images && formData.site_images.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem' }}>
-                  {formData.site_images.map((imgUrl, idx) => (
-                    <div key={idx} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', height: '90px', border: '1px solid var(--border)' }}>
-                      <img src={imgUrl} alt={`Site ${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveImage(idx)}
-                        style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', border: 'none', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '12px' }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ fontSize: '0.8rem', color: 'var(--muted)', margin: 0, fontStyle: 'italic' }}>
-                  {lang === 'ar' ? 'لم يتم إرفاق صور موقيعية بعد. انقر على "إرفاق صور" لتضمين لقطات من موقع العمل.' : 'No site photos attached yet.'}
-                </p>
-              )}
-            </div>
-
-            {/* Grid for Sections */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-              
-              {/* Section 1: Basics */}
-              <div className="glass-panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
-                    {t('sectionBasics')}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReport(formData, 'basics')}
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Printer size={13} />
-                    {lang === 'ar' ? 'طباعة قسم الأساسيات PDF' : 'Print Basics Section PDF'}
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-                  {Object.keys(formData.basics).map((item) => (
-                    <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border-soft)' }}>
-                      <span style={{ fontWeight: '500', flex: 1 }}>{t(item)}</span>
-                      <div style={{ display: 'flex', gap: '0.5rem', width: '180px' }}>
-                        <input
-                          type="text"
-                          placeholder={t('materialPulled')}
-                          className="form-input"
-                          style={{ padding: '6px', textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                          value={formData.basics[item].pulled}
-                          onChange={(e) => handleFieldChange('basics', item, 'pulled', e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          placeholder={t('materialRemaining')}
-                          className="form-input"
-                          style={{ padding: '6px', textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                          value={formData.basics[item].remaining}
-                          onChange={(e) => handleFieldChange('basics', item, 'remaining', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '1.2rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
-                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد الأساسية:' : '📝 Basics Section Notes & Updates:'}
-                  </label>
-                  <textarea
-                    className="form-input"
-                    rows="2"
-                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بالمواد الأساسية...' : 'Notes for basics section...'}
-                    value={formData.basics_notes || ''}
-                    onChange={(e) => handleFieldChange('basics_notes', null, null, e.target.value)}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                </div>
-              </div>
-
-              {/* Section 2: Marble Inventory */}
-              <div className="glass-panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
-                    {t('sectionMarble')}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReport(formData, 'marble')}
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Printer size={13} />
-                    {lang === 'ar' ? 'طباعة قسم المرمر PDF' : 'Print Marble Section PDF'}
-                  </button>
-                </div>
-                
-                <div className="table-responsive">
-                  <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr' }}>
-                    <thead>
-                      <tr>
-                        <th>{t('colZoneName')}</th>
-                        <th style={{ textAlign: 'center' }}>{t('skiliatCount')}</th>
-                        <th style={{ textAlign: 'center' }}>{t('piecesPerSkilia')}</th>
-                        <th style={{ textAlign: 'center' }}>{t('loosePieces')}</th>
-                        <th style={{ textAlign: 'center' }}>{t('totalPieces')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {['zone_a', 'zone_b', 'zone_c'].map((zone) => (
-                        <React.Fragment key={zone}>
-                          {/* White Marble */}
-                          <tr>
-                            <td style={{ fontWeight: '700' }}>
-                              {(lang === 'ar' ? zone.replace('zone_', 'زون ').toUpperCase() : zone.replace('zone_', 'Zone ').toUpperCase())} - {t('marbleWhiteTitle')}
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].white.skiliat}
-                                onChange={(e) => handleMarbleChange(zone, 'white', 'skiliat', e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].white.pieces_per_skilia}
-                                onChange={(e) => handleMarbleChange(zone, 'white', 'pieces_per_skilia', e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].white.loose}
-                                onChange={(e) => handleMarbleChange(zone, 'white', 'loose', e.target.value)}
-                              />
-                            </td>
-                            <td style={{ textAlign: 'center', fontWeight: '800', fontFamily: 'var(--font-english)' }}>
-                              {(formData.marble[zone].white.total || 0).toLocaleString()}
-                            </td>
-                          </tr>
-                          
-                          {/* Brown Marble */}
-                          <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                            <td style={{ fontWeight: '700', color: 'var(--accent)' }}>
-                              {(lang === 'ar' ? zone.replace('zone_', 'زون ').toUpperCase() : zone.replace('zone_', 'Zone ').toUpperCase())} - {t('marbleBrownTitle')}
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].brown.skiliat}
-                                onChange={(e) => handleMarbleChange(zone, 'brown', 'skiliat', e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].brown.pieces_per_skilia}
-                                onChange={(e) => handleMarbleChange(zone, 'brown', 'pieces_per_skilia', e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input 
-                                type="text" 
-                                className="form-input" 
-                                style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                                value={formData.marble[zone].brown.loose}
-                                onChange={(e) => handleMarbleChange(zone, 'brown', 'loose', e.target.value)}
-                              />
-                            </td>
-                            <td style={{ textAlign: 'center', fontWeight: '800', fontFamily: 'var(--font-english)', color: 'var(--accent)' }}>
-                              {(formData.marble[zone].brown.total || 0).toLocaleString()}
-                            </td>
-                          </tr>
-                        </React.Fragment>
-                      ))}
-
-                      {/* Cumulative sums row */}
-                      <tr style={{ background: 'rgba(255,255,255,0.03)', fontWeight: '800' }}>
-                        <td>{lang === 'ar' ? 'الإجمالي التراكمي' : 'Cumulative / Totals'}</td>
-                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}>
-                          <div>{lang === 'ar' ? 'أبيض: ' : 'W: '}{cumulative.totalWhiteSkiliat}</div>
-                          <div style={{ color: 'var(--accent)' }}>{lang === 'ar' ? 'جوزي: ' : 'B: '}{cumulative.totalBrownSkiliat}</div>
-                        </td>
-                        <td style={{ textAlign: 'center', color: 'var(--muted)' }}>-</td>
-                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}>
-                          <div>{lang === 'ar' ? 'أبيض: ' : 'W: '}{cumulative.totalWhiteLoose}</div>
-                          <div style={{ color: 'var(--accent)' }}>{lang === 'ar' ? 'جوزي: ' : 'B: '}{cumulative.totalBrownLoose}</div>
-                        </td>
-                        <td style={{ textAlign: 'center', fontFamily: 'var(--font-english)' }}>
-                          <div style={{ color: '#eef2f7' }}>{t('netWhite')}: {cumulative.netWhite.toLocaleString()}</div>
-                          <div style={{ color: 'var(--accent)' }}>{t('netBrown')}: {cumulative.netBrown.toLocaleString()}</div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ marginTop: '1.2rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
-                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المرمر:' : '📝 Marble Section Notes & Updates:'}
-                  </label>
-                  <textarea
-                    className="form-input"
-                    rows="2"
-                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بجرد وتفريغ المرمر...' : 'Notes for marble section...'}
-                    value={formData.marble_notes || ''}
-                    onChange={(e) => handleFieldChange('marble_notes', null, null, e.target.value)}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                </div>
-              </div>
-
-              {/* Section 3: Sealants & Sponges */}
-              <div className="glass-panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
-                    {t('sectionSealants')}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReport(formData, 'sealants')}
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Printer size={13} />
-                    {lang === 'ar' ? 'طباعة قسم العوازل PDF' : 'Print Sealants Section PDF'}
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-                  {Object.keys(formData.sealants).map((item) => (
-                    <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border-soft)' }}>
-                      <span style={{ fontWeight: '500', flex: 1 }}>{t(item)}</span>
-                      <div style={{ display: 'flex', gap: '0.5rem', width: '180px' }}>
-                        <input
-                          type="text"
-                          placeholder={t('materialPulled')}
-                          className="form-input"
-                          style={{ padding: '6px', textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                          value={formData.sealants[item].pulled}
-                          onChange={(e) => handleFieldChange('sealants', item, 'pulled', e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          placeholder={t('materialRemaining')}
-                          className="form-input"
-                          style={{ padding: '6px', textAlign: 'center', fontFamily: 'var(--font-english)' }}
-                          value={formData.sealants[item].remaining}
-                          onChange={(e) => handleFieldChange('sealants', item, 'remaining', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '1.2rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
-                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد العازلة والصوصج:' : '📝 Sealants Section Notes & Updates:'}
-                  </label>
-                  <textarea
-                    className="form-input"
-                    rows="2"
-                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بـ الصوصج والعوازل والحيال الاسفنجية...' : 'Notes for sealants section...'}
-                    value={formData.sealants_notes || ''}
-                    onChange={(e) => handleFieldChange('sealants_notes', null, null, e.target.value)}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                </div>
-              </div>
-
-              {/* Section 4: Bulk Materials */}
-              <div className="glass-panel">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--accent)' }}>
-                    {t('sectionBulk')}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReport(formData, 'bulk')}
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: '0.8rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Printer size={13} />
-                    {lang === 'ar' ? 'طباعة قسم السائبة PDF' : 'Print Bulk Section PDF'}
-                  </button>
-                </div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.2rem' }}>
-                  {/* Cement + Sand */}
-                  <div className="glass-panel" style={{ padding: '1rem', background: 'rgba(0,0,0,0.1)' }}>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: '700', marginBottom: '0.6rem' }}>{t('cement')}</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>{t('cementQty')}</label>
-                        <input 
-                          type="text" 
-                          className="form-input" 
-                          style={{ fontFamily: 'var(--font-english)' }}
-                          value={formData.bulk.cement}
-                          onChange={(e) => handleFieldChange('bulk', 'cement', null, e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>{t('sandQty')}</label>
-                        <input 
-                          type="text" 
-                          className="form-input" 
-                          style={{ fontFamily: 'var(--font-english)' }}
-                          value={formData.bulk.sand}
-                          onChange={(e) => handleFieldChange('bulk', 'sand', null, e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Foam */}
-                  <div className="glass-panel" style={{ padding: '1rem', background: 'rgba(0,0,0,0.1)' }}>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: '700', marginBottom: '0.6rem' }}>{t('foam')}</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>{t('materialPulled')}</label>
-                        <input 
-                          type="text" 
-                          className="form-input" 
-                          style={{ fontFamily: 'var(--font-english)' }}
-                          value={formData.bulk.foam.pulled}
-                          onChange={(e) => handleFieldChange('bulk', 'foam', 'pulled', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>{t('materialRemaining')}</label>
-                        <input 
-                          type="text" 
-                          className="form-input" 
-                          style={{ fontFamily: 'var(--font-english)' }}
-                          value={formData.bulk.foam.remaining}
-                          onChange={(e) => handleFieldChange('bulk', 'foam', 'remaining', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ marginTop: '1.2rem' }}>
-                  <label className="form-label" style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: '700' }}>
-                    {lang === 'ar' ? '📝 ملاحظات وتحديثات قسم المواد السائبة الإسمنت والرمل والفوم:' : '📝 Bulk Section Notes & Updates:'}
-                  </label>
-                  <textarea
-                    className="form-input"
-                    rows="2"
-                    placeholder={lang === 'ar' ? 'أكتب ملاحظات أو تحديثات خاصة بالأسمنت والرمل والفوم...' : 'Notes for bulk section...'}
-                    value={formData.bulk_notes || ''}
-                    onChange={(e) => handleFieldChange('bulk_notes', null, null, e.target.value)}
-                    style={{ width: '100%', resize: 'vertical' }}
-                  />
-                </div>
-              </div>
-
-              {/* Section 5: General Notes */}
-              <div className="glass-panel">
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '800', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem', color: 'var(--accent)' }}>
-                  {lang === 'ar' ? '📝 ملاحظات وتحديثات استهلاك عامة (شاملة)' : '📝 General Consumption Notes & Updates'}
-                </h3>
-                <textarea
-                  className="form-input"
-                  rows="3"
-                  placeholder={t('materialsReportNotes')}
-                  value={formData.notes}
-                  onChange={(e) => handleFieldChange('notes', null, null, e.target.value)}
-                  style={{ width: '100%', resize: 'vertical' }}
-                />
-              </div>
-
-            </div>
-
-
-            {/* Form actions */}
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
-              {showAutoSaveIndicator && !isEditingId && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <CheckCircle2 size={12} style={{ color: 'var(--success)' }} />
-                  {t('autoSaveDraft')}
-                </span>
-              )}
-              
-              {!isEditingId && (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    if (window.confirm(lang === 'ar' ? 'هل أنت متأكد من تفريغ النموذج والبدء من جديد؟' : 'Are you sure you want to clear the form and start clean?')) {
-                      setFormData(INITIAL_FORM_STATE);
-                      setIsCloned(false);
-                      localStorage.removeItem('materials_consumption_draft');
-                    }
-                  }}
-                  style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'var(--border)' }}
-                >
-                  {lang === 'ar' ? 'البدء بنموذج فارغ' : 'Start with Empty Form'}
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => handlePrintReport(formData)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--success)' }}
-              >
-                <Printer size={18} />
-                {lang === 'ar' ? 'طباعة / تصدير PDF' : 'Print / Export PDF'}
-              </button>
-
-              <button 
-                type="submit" 
-                className="btn btn-primary"
-                disabled={loading}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-              >
-                <Save size={18} />
-                {isEditingId ? t('updateReport') : t('submitReport')}
-              </button>
-            </div>
-
-          </motion.form>
-        )}
-      </AnimatePresence>
-
-      {/* ── Custom In-App Delete Confirmation Modal ──────────────── */}
-      <AnimatePresence>
-        {reportToDelete && (
-          <div
-            className="modal-overlay"
-            style={{
-              position: 'fixed',
-              top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.75)',
-              backdropFilter: 'blur(6px)',
-              zIndex: 10001,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '1rem'
-            }}
-            onClick={() => !deletingReportId && setReportToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              style={{
-                background: 'var(--surface-solid, #1e293b)',
-                borderRadius: 'var(--radius-xl, 16px)',
-                width: '100%',
-                maxWidth: '440px',
-                padding: '2rem 1.75rem',
-                border: '1px solid var(--border)',
-                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
-                textAlign: 'center'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem auto' }}>
-                <Trash2 size={28} />
-              </div>
-
-              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--fg)', marginBottom: '0.5rem' }}>
-                {lang === 'ar' ? 'تأكيد حذف تقرير استهلاك المواد' : 'Confirm Report Deletion'}
-              </h3>
-              
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.6' }}>
-                {lang === 'ar' 
-                  ? `هل أنت متأكد من رغبتك في حذف تقرير استهلاك المواد لتاريخ (${reportToDelete.date || ''})؟ لا يمكن التراجع عن هذا الإجراء.`
-                  : `Are you sure you want to delete the materials consumption report for date (${reportToDelete.date || ''})? This action cannot be undone.`}
-              </p>
-
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => setReportToDelete(null)}
-                  disabled={Boolean(deletingReportId)}
-                  className="btn btn-secondary"
-                  style={{ flex: 1, padding: '0.65rem', fontWeight: '600' }}
-                >
-                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmDeleteReport}
-                  disabled={Boolean(deletingReportId)}
-                  className="btn btn-danger"
-                  style={{ flex: 1, padding: '0.65rem', fontWeight: '700', background: 'var(--danger, #ef4444)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                >
-                  {deletingReportId ? (lang === 'ar' ? 'جاري الحذف...' : 'Deleting...') : (lang === 'ar' ? 'نعم، احذف' : 'Yes, Delete')}
-                </button>
-              </div>
-            </motion.div>
+          <div className="table-wrap">
+            <table className="dt dt--stack dt--stack3">
+              <thead>
+                <tr>
+                  <th>{t('materialsReportDate')}</th>
+                  <th>{t('materialsReportDay')}</th>
+                  <th>{isAr ? 'الوقت' : 'Time'}</th>
+                  <th>{t('materialsReportPreparedBy')}</th>
+                  <th className="c-num">{isAr ? 'رصيد المرمر' : 'Marble stock'}</th>
+                  <th className="c-actions"><span className="sr-only">{isAr ? 'إجراءات' : 'Actions'}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.map(report => {
+                  const tot = marbleTotals(report);
+                  const lows = getLowStockItems(report).length;
+                  return (
+                    <tr key={report.id} data-clickable="true" onClick={() => setViewing(report)}>
+                      <td className="c-title">
+                        <span className="task-name">
+                          <span className="num">{report.date}</span>
+                          {lows > 0 && <span className="badge badge--warn"><AlertTriangle size={12} aria-hidden="true" />{isAr ? `${lows} منخفض` : `${lows} low`}</span>}
+                        </span>
+                      </td>
+                      <td data-label={t('materialsReportDay')}>{report.day}</td>
+                      <td data-label={isAr ? 'الوقت' : 'Time'}><span className="num">{report.start_time} - {report.end_time}</span></td>
+                      <td data-label={t('materialsReportPreparedBy')}>{report.prepared_by || '-'}</td>
+                      <td className="c-num" data-label={isAr ? 'رصيد المرمر' : 'Marble stock'}>
+                        <span className="num">{num(tot.white + tot.brown)}</span>
+                        <span className="text-xs muted"> ({isAr ? 'أ' : 'W'} <span className="num">{num(tot.white)}</span> · {isAr ? 'ج' : 'B'} <span className="num">{num(tot.brown)}</span>)</span>
+                      </td>
+                      <td className="c-actions" onClick={(e) => e.stopPropagation()}>
+                        <div className="btn-row">
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setViewing(report)}>
+                            <Eye size={15} aria-hidden="true" />
+                            {isAr ? 'عرض' : 'View'}
+                          </button>
+                          <button type="button" className="btn btn--ghost btn--sm btn--icon" onClick={() => print(report)} aria-label={isAr ? `طباعة تقرير ${report.date}` : `Print report ${report.date}`} title="PDF">
+                            <Printer size={15} aria-hidden="true" />
+                          </button>
+                          {editable && (
+                            <>
+                              <button type="button" className="btn btn--ghost btn--sm btn--icon" onClick={() => openClone(report)} aria-label={isAr ? 'نسخ كتقرير جديد' : 'Copy as new report'} title={isAr ? 'نسخ كتقرير جديد' : 'Copy as new'}>
+                                <Copy size={15} aria-hidden="true" />
+                              </button>
+                              <button type="button" className="btn btn--ghost btn--sm btn--icon" onClick={() => openEdit(report)} aria-label={isAr ? `تعديل تقرير ${report.date}` : `Edit report ${report.date}`} title={isAr ? 'تعديل' : 'Edit'}>
+                                <Pencil size={15} aria-hidden="true" />
+                              </button>
+                              <button type="button" className="btn btn--danger-ghost btn--sm btn--icon" onClick={() => setToDelete(report)} aria-label={isAr ? `حذف تقرير ${report.date}` : `Delete report ${report.date}`} title={isAr ? 'حذف' : 'Delete'}>
+                                <Trash2 size={15} aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </AnimatePresence>
+      </section>
 
-      </div>
+      <ReportDetail
+        report={viewing}
+        t={t}
+        lang={lang}
+        editable={editable}
+        onClose={() => setViewing(null)}
+        onPrint={print}
+        onEdit={openEdit}
+        onClone={openClone}
+        onDelete={(r) => setToDelete(r)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(toDelete)}
+        lang={lang}
+        title={isAr ? 'حذف تقرير الجرد' : 'Delete report'}
+        message={isAr ? `سيُحذف تقرير يوم ${toDelete?.date || ''} نهائياً.` : `The report for ${toDelete?.date || ''} will be deleted permanently.`}
+        confirmLabel={isAr ? 'حذف' : 'Delete'}
+        onConfirm={confirmDelete}
+        onClose={() => setToDelete(null)}
+      />
     </div>
   );
+}
+
+// ── Read-only detail of one report ────────────────────────────────────────
+
+function ItemsList({ items, t, lang }) {
+  const rows = Object.entries(items || {}).filter(([k, v]) => isItemKey(k) && v && typeof v === 'object');
+  return (
+    <div className="mat-rows">
+      <div className="mat-row mat-row--head" aria-hidden="true">
+        <span />
+        <span>{t('materialPulled')}</span>
+        <span>{t('materialRemaining')}</span>
+      </div>
+      {rows.map(([k, v]) => {
+        const thresh = DEFAULT_THRESHOLDS[k];
+        const rem = parseFloat(v.remaining);
+        const low = thresh !== undefined && !Number.isNaN(rem) && rem <= thresh;
+        return (
+          <div className="mat-row" key={k}>
+            <span className="mat-name">{t(k)}{low && <span className="badge badge--warn">{lang === 'ar' ? 'منخفض' : 'Low'}</span>}</span>
+            <span className="num">{v.pulled || '0'}</span>
+            <span className={`num${low ? ' text-warn fw-bold' : ''}`}>{v.remaining || '0'}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReportDetail({ report, t, lang, editable, onClose, onPrint, onEdit, onClone, onDelete }) {
+  const isAr = lang === 'ar';
+  if (!report) return null;
+  const tot = marbleTotals(report);
+  const sectionHead = (key) => (
+    <div className="form-section-title">
+      <span>{SECTION_TITLES[key][isAr ? 'ar' : 'en']}</span>
+      <button type="button" className="btn btn--ghost btn--sm" onClick={() => onPrint(report, key)}>
+        <Printer size={15} aria-hidden="true" />
+        PDF
+      </button>
+    </div>
+  );
+  return (
+    <Modal
+      open={Boolean(report)}
+      onClose={onClose}
+      size="xl"
+      title={`${isAr ? 'جرد يوم' : 'Count for'} ${report.day || ''} ${report.date}`}
+      description={`${report.start_time || '-'} - ${report.end_time || '-'} · ${report.prepared_by || '-'}`}
+      closeLabel={isAr ? 'إغلاق' : 'Close'}
+      footer={
+        <>
+          {editable && (
+            <button type="button" className="btn btn--danger-ghost" onClick={() => onDelete(report)} style={{ marginInlineEnd: 'auto' }}>
+              <Trash2 size={17} aria-hidden="true" />
+              {isAr ? 'حذف' : 'Delete'}
+            </button>
+          )}
+          {editable && (
+            <button type="button" className="btn btn--secondary" onClick={() => onClone(report)}>
+              <Copy size={17} aria-hidden="true" />
+              {isAr ? 'نسخ' : 'Copy'}
+            </button>
+          )}
+          {editable && (
+            <button type="button" className="btn btn--secondary" onClick={() => onEdit(report)}>
+              <Pencil size={17} aria-hidden="true" />
+              {isAr ? 'تعديل' : 'Edit'}
+            </button>
+          )}
+          <button type="button" className="btn btn--primary" onClick={() => onPrint(report)}>
+            <Printer size={17} aria-hidden="true" />
+            {isAr ? 'التقرير الكامل PDF' : 'Full report PDF'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <section className="form-section">
+          {sectionHead('basics')}
+          <ItemsList items={report.basics} t={t} lang={lang} />
+          {report.basics_notes && <p className="note-block">{report.basics_notes}</p>}
+        </section>
+
+        <section className="form-section">
+          {sectionHead('marble')}
+          <div className="table-wrap">
+            <table className="dt dt--dense">
+              <thead>
+                <tr>
+                  <th>{t('colZoneName')}</th>
+                  <th className="c-num">{t('skiliatCount')}</th>
+                  <th className="c-num">{t('piecesPerSkilia')}</th>
+                  <th className="c-num">{t('loosePieces')}</th>
+                  <th className="c-num">{t('totalPieces')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ZONES.map(zone => ['white', 'brown'].map(color => {
+                  const d = report.marble?.[zone]?.[color] || {};
+                  return (
+                    <tr key={`${zone}-${color}`}>
+                      <td>{isAr ? 'زون' : 'Zone'} {ZONE_NAMES[zone]} · {color === 'white' ? t('marbleWhiteTitle') : t('marbleBrownTitle')}</td>
+                      <td className="c-num">{d.skiliat || 0}</td>
+                      <td className="c-num">{d.pieces_per_skilia || 198}</td>
+                      <td className="c-num">{d.loose || 0}</td>
+                      <td className="c-num c-strong">{num(d.total || 0)}</td>
+                    </tr>
+                  );
+                }))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>{isAr ? 'المجموع' : 'Total'}</td>
+                  <td className="c-num">{tot.whiteSk + tot.brownSk}</td>
+                  <td className="c-num">-</td>
+                  <td className="c-num">{tot.whiteLoose + tot.brownLoose}</td>
+                  <td className="c-num">{num(tot.white + tot.brown)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {report.marble_notes && <p className="note-block">{report.marble_notes}</p>}
+        </section>
+
+        <section className="form-section">
+          {sectionHead('sealants')}
+          <ItemsList items={report.sealants} t={t} lang={lang} />
+          {report.sealants_notes && <p className="note-block">{report.sealants_notes}</p>}
+        </section>
+
+        <section className="form-section">
+          {sectionHead('bulk')}
+          <div className="kv kv--3">
+            <div className="kv-item"><div className="kv-label">{t('cementQty')}</div><div className="kv-value kv-value--lg">{report.bulk?.cement || '0'}</div></div>
+            <div className="kv-item"><div className="kv-label">{t('sandQty')}</div><div className="kv-value kv-value--lg">{report.bulk?.sand || '0'}</div></div>
+            <div className="kv-item"><div className="kv-label">{t('foam')}</div><div className="kv-value kv-value--lg num">{report.bulk?.foam?.pulled || '0'} / {report.bulk?.foam?.remaining || '0'}</div></div>
+          </div>
+          {report.bulk_notes && <p className="note-block">{report.bulk_notes}</p>}
+        </section>
+
+        {report.notes && (
+          <section className="form-section">
+            <div className="form-section-title">{isAr ? 'ملاحظات عامة وسجل التعديلات' : 'General notes & change log'}</div>
+            <p className="note-block">{report.notes}</p>
+          </section>
+        )}
+
+        {report.site_images?.length > 0 && (
+          <section className="form-section">
+            <div className="form-section-title">{isAr ? 'صور الموقع' : 'Site photos'}</div>
+            <div className="photo-grid">
+              {report.site_images.map((src, i) => (
+                <a key={i} href={src} target="_blank" rel="noreferrer" className="photo">
+                  <img src={src} alt={`${isAr ? 'صورة' : 'Photo'} ${i + 1}`} loading="lazy" />
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── Entry form ────────────────────────────────────────────────────────────
+
+function ConsumptionForm({
+  formData, setFormData, editingId, isCloned, saving, submitError, draftSaved, t, lang,
+  onBack, onSubmit, onPrint, onClear, confirmClear, onConfirmClear, onCancelClear,
+}) {
+  const isAr = lang === 'ar';
+  const fileRef = useRef(null);
+  const lows = useMemo(() => getLowStockItems(formData), [formData]);
+  const tot = marbleTotals(formData);
+  const Back = isAr ? ArrowRight : ArrowLeft;
+
+  const setTop = (key, value) => setFormData(prev => {
+    const next = { ...prev, [key]: value };
+    if (key === 'date' && value) next.day = dayFor(value);
+    return next;
+  });
+  const setItem = (section, item, field, value) => setFormData(prev => {
+    const next = clone(prev);
+    next[section][item][field] = value;
+    return next;
+  });
+  const setBulk = (item, field, value) => setFormData(prev => {
+    const next = clone(prev);
+    if (item === 'foam') next.bulk.foam[field] = value;
+    else next.bulk[item] = value;
+    return next;
+  });
+  const setMarble = (zone, color, field, value) => setFormData(prev => {
+    const next = clone(prev);
+    next.marble[zone][color][field] = value;
+    return withTotals(next);
+  });
+
+  const addImages = (event) => {
+    const files = Array.from(event.target.files || []).filter(f => f.type.startsWith('image/'));
+    event.target.value = '';
+    const room = MAX_IMAGES - (formData.site_images?.length || 0);
+    if (room <= 0) {
+      toast.error(isAr ? `الحد الأقصى ${MAX_IMAGES} صور.` : `Maximum ${MAX_IMAGES} photos.`);
+      return;
+    }
+    files.slice(0, room).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          // Downscale to 800px and JPEG 65% so reports stay light.
+          const maxDim = 800;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim; }
+            else { width = Math.round((width * maxDim) / height); height = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+          setFormData(prev => {
+            const current = Array.isArray(prev.site_images) ? prev.site_images : [];
+            if (current.length >= MAX_IMAGES) return prev;
+            return { ...prev, site_images: [...current, dataUrl] };
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeImage = (index) => setFormData(prev => ({
+    ...prev,
+    site_images: (prev.site_images || []).filter((_, i) => i !== index),
+  }));
+
+  const title = editingId
+    ? (isAr ? 'تعديل تقرير الجرد' : 'Edit count')
+    : isCloned ? (isAr ? 'جرد جديد (منسوخ من آخر جرد)' : 'New count (copied from latest)') : (isAr ? 'جرد جديد' : 'New count');
+
+  const jump = [
+    ['mc-general', isAr ? 'البيانات' : 'Details'],
+    ['mc-basics', isAr ? 'الأساسية' : 'Basics'],
+    ['mc-marble', isAr ? 'المرمر' : 'Marble'],
+    ['mc-sealants', isAr ? 'العوازل' : 'Sealants'],
+    ['mc-bulk', isAr ? 'السائبة' : 'Bulk'],
+    ['mc-photos', isAr ? 'الصور' : 'Photos'],
+  ];
+
+  const itemRows = (section) => (
+    <div className="mat-rows">
+      <div className="mat-row mat-row--head" aria-hidden="true">
+        <span />
+        <span>{t('materialPulled')}</span>
+        <span>{t('materialRemaining')}</span>
+      </div>
+      {Object.keys(formData[section] || {}).filter(isItemKey).map(item => {
+        const label = t(item);
+        return (
+          <div className="mat-row" key={item}>
+            <label className="mat-name" htmlFor={`${section}-${item}-p`}>{label}</label>
+            <input id={`${section}-${item}-p`} className="input input--sm input--num" value={formData[section][item]?.pulled ?? ''}
+              onChange={(e) => setItem(section, item, 'pulled', e.target.value)} aria-label={`${label}: ${t('materialPulled')}`} inputMode="decimal" />
+            <input className="input input--sm input--num" value={formData[section][item]?.remaining ?? ''}
+              onChange={(e) => setItem(section, item, 'remaining', e.target.value)} aria-label={`${label}: ${t('materialRemaining')}`} inputMode="decimal" />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const sectionCard = (id, key, index, body, notesKey) => (
+    <section className="card" id={id} aria-labelledby={`${id}-t`}>
+      <div className="card-header card-header--divided">
+        <h2 className="card-title" id={`${id}-t`}>
+          <span className="step-index">{index}</span>
+          {SECTION_TITLES[key][isAr ? 'ar' : 'en']}
+        </h2>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={() => onPrint(key)}>
+          <Printer size={15} aria-hidden="true" />
+          {isAr ? 'طباعة القسم' : 'Print section'}
+        </button>
+      </div>
+      <div className="card-body stack-sm">
+        {body}
+        <Field label={isAr ? 'ملاحظات القسم' : 'Section notes'} htmlFor={`${id}-notes`}>
+          <textarea id={`${id}-notes`} className="textarea" rows={2} value={formData[notesKey] || ''} onChange={(e) => setTop(notesKey, e.target.value)} />
+        </Field>
+      </div>
+    </section>
+  );
+
+  return (
+    <form className="stack" onSubmit={onSubmit}>
+      <div className="form-head">
+        <button type="button" className="btn btn--ghost" onClick={onBack}>
+          <Back size={18} aria-hidden="true" />
+          {t('backToHistory')}
+        </button>
+        <h2 className="form-head-title">{title}</h2>
+        {!editingId && draftSaved && (
+          <span className="text-xs muted form-head-status"><CheckCircle2 size={14} aria-hidden="true" /> {t('autoSaveDraft')}</span>
+        )}
+      </div>
+
+      <nav className="chips" aria-label={isAr ? 'أقسام النموذج' : 'Form sections'}>
+        {jump.map(([id, label]) => (
+          <a key={id} className="chip" href={`#${id}`} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      {submitError && (
+        <div className="alert alert--danger" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div className="alert-body">{submitError}</div>
+        </div>
+      )}
+
+      <section className="card" id="mc-general" aria-labelledby="mc-general-t">
+        <div className="card-header card-header--divided">
+          <h2 className="card-title" id="mc-general-t"><CalendarDays size={20} aria-hidden="true" />{isAr ? 'بيانات الجرد' : 'Count details'}</h2>
+        </div>
+        <div className="card-body">
+          <div className="form-grid form-grid--4">
+            <Field label={t('materialsReportDate')} htmlFor="mc-date">
+              <input id="mc-date" type="date" className="input" value={formData.date} onChange={(e) => setTop('date', e.target.value)} required />
+            </Field>
+            <Field label={t('materialsReportDay')} htmlFor="mc-day">
+              <select id="mc-day" className="select" value={formData.day} onChange={(e) => setTop('day', e.target.value)}>
+                {DAYS_OF_WEEK.ar.map((d, i) => <option key={d} value={d}>{isAr ? d : DAYS_OF_WEEK.en[i]}</option>)}
+              </select>
+            </Field>
+            <Field label={t('materialsReportStartTime')} htmlFor="mc-start">
+              <input id="mc-start" type="time" className="input" value={formData.start_time} onChange={(e) => setTop('start_time', e.target.value)} />
+            </Field>
+            <Field label={t('materialsReportEndTime')} htmlFor="mc-end">
+              <input id="mc-end" type="time" className="input" value={formData.end_time} onChange={(e) => setTop('end_time', e.target.value)} />
+            </Field>
+            <Field label={t('materialsReportPreparedBy')} htmlFor="mc-by" className="span-all">
+              <input id="mc-by" className="input" value={formData.prepared_by} onChange={(e) => setTop('prepared_by', e.target.value)} required />
+            </Field>
+          </div>
+        </div>
+      </section>
+
+      {lows.length > 0 && (
+        <div className="alert alert--warn" role="status">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div className="alert-body">
+            <strong>{isAr ? 'مواد وصلت إلى الحد الأدنى في المخزن' : 'Items at or below minimum stock'}</strong>
+            <div className="low-list">
+              {lows.map(a => (
+                <span key={a.key} className="badge badge--warn">
+                  {a.name}: <span className="num">{a.remaining}</span> ({isAr ? 'الحد' : 'min'} <span className="num">{a.threshold}</span>)
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sectionCard('mc-basics', 'basics', 1, itemRows('basics'), 'basics_notes')}
+
+      {sectionCard('mc-marble', 'marble', 2, (
+        <>
+          <div className="zone-grid">
+            {ZONES.map(zone => (
+              <fieldset key={zone} className="zone-card">
+                <legend>{isAr ? 'زون' : 'Zone'} {ZONE_NAMES[zone]}</legend>
+                {['white', 'brown'].map(color => {
+                  const d = formData.marble[zone][color];
+                  const colorLabel = color === 'white' ? t('marbleWhiteTitle') : t('marbleBrownTitle');
+                  return (
+                    <div key={color} className="zone-row">
+                      <div className="zone-row-head">
+                        <span><span className="swatch" style={{ background: `var(--viz-${color})`, display: 'inline-block', marginInlineEnd: 'var(--space-2)' }} />{colorLabel}</span>
+                        <strong className="num">{num(d.total || 0)}</strong>
+                      </div>
+                      <div className="zone-inputs">
+                        <Field label={t('skiliatCount')} htmlFor={`${zone}-${color}-sk`}>
+                          <input id={`${zone}-${color}-sk`} className="input input--sm input--num" inputMode="numeric" value={d.skiliat} onChange={(e) => setMarble(zone, color, 'skiliat', e.target.value)} />
+                        </Field>
+                        <Field label={t('piecesPerSkilia')} htmlFor={`${zone}-${color}-pp`}>
+                          <input id={`${zone}-${color}-pp`} className="input input--sm input--num" inputMode="numeric" value={d.pieces_per_skilia} onChange={(e) => setMarble(zone, color, 'pieces_per_skilia', e.target.value)} />
+                        </Field>
+                        <Field label={t('loosePieces')} htmlFor={`${zone}-${color}-lo`}>
+                          <input id={`${zone}-${color}-lo`} className="input input--sm input--num" inputMode="numeric" value={d.loose} onChange={(e) => setMarble(zone, color, 'loose', e.target.value)} />
+                        </Field>
+                      </div>
+                    </div>
+                  );
+                })}
+              </fieldset>
+            ))}
+          </div>
+          <div className="kv kv--3 totals-strip">
+            <div className="kv-item"><div className="kv-label">{t('netWhite')}</div><div className="kv-value kv-value--lg num">{num(tot.white)}</div></div>
+            <div className="kv-item"><div className="kv-label">{t('netBrown')}</div><div className="kv-value kv-value--lg num">{num(tot.brown)}</div></div>
+            <div className="kv-item"><div className="kv-label">{isAr ? 'المجموع' : 'Total'}</div><div className="kv-value kv-value--lg num text-accent">{num(tot.white + tot.brown)}</div></div>
+          </div>
+        </>
+      ), 'marble_notes')}
+
+      {sectionCard('mc-sealants', 'sealants', 3, itemRows('sealants'), 'sealants_notes')}
+
+      {sectionCard('mc-bulk', 'bulk', 4, (
+        <div className="form-grid form-grid--4">
+          <Field label={t('cementQty')} htmlFor="mc-cement">
+            <input id="mc-cement" className="input input--num" value={formData.bulk.cement} onChange={(e) => setBulk('cement', null, e.target.value)} inputMode="decimal" />
+          </Field>
+          <Field label={t('sandQty')} htmlFor="mc-sand">
+            <input id="mc-sand" className="input" value={formData.bulk.sand} onChange={(e) => setBulk('sand', null, e.target.value)} />
+          </Field>
+          <Field label={`${t('foam')}: ${t('materialPulled')}`} htmlFor="mc-foam-p">
+            <input id="mc-foam-p" className="input input--num" value={formData.bulk.foam?.pulled ?? ''} onChange={(e) => setBulk('foam', 'pulled', e.target.value)} inputMode="decimal" />
+          </Field>
+          <Field label={`${t('foam')}: ${t('materialRemaining')}`} htmlFor="mc-foam-r">
+            <input id="mc-foam-r" className="input input--num" value={formData.bulk.foam?.remaining ?? ''} onChange={(e) => setBulk('foam', 'remaining', e.target.value)} inputMode="decimal" />
+          </Field>
+        </div>
+      ), 'bulk_notes')}
+
+      <section className="card" id="mc-photos" aria-labelledby="mc-photos-t">
+        <div className="card-header card-header--divided">
+          <div>
+            <h2 className="card-title" id="mc-photos-t"><Camera size={20} aria-hidden="true" />{isAr ? 'صور الموقع' : 'Site photos'}</h2>
+            <p className="card-subtitle">{isAr ? `حتى ${MAX_IMAGES} صور، تُضمَّن في تقرير PDF.` : `Up to ${MAX_IMAGES} photos, included in the PDF.`}</p>
+          </div>
+          <button type="button" className="btn btn--secondary" onClick={() => fileRef.current?.click()} disabled={(formData.site_images?.length || 0) >= MAX_IMAGES}>
+            <Camera size={18} aria-hidden="true" />
+            {isAr ? 'إرفاق صور' : 'Add photos'}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={addImages} />
+        </div>
+        <div className="card-body">
+          {formData.site_images?.length > 0 ? (
+            <div className="photo-grid">
+              {formData.site_images.map((src, i) => (
+                <div key={i} className="photo">
+                  <img src={src} alt={`${isAr ? 'صورة' : 'Photo'} ${i + 1}`} />
+                  <button type="button" className="photo-remove" onClick={() => removeImage(i)} aria-label={`${isAr ? 'إزالة الصورة' : 'Remove photo'} ${i + 1}`}>
+                    <X size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm muted">{isAr ? 'لا توجد صور مرفقة.' : 'No photos attached.'}</p>
+          )}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-body">
+          <Field label={isAr ? 'ملاحظات عامة' : 'General notes'} htmlFor="mc-notes" hint={isAr ? 'عند الحفظ يُضاف تلقائياً سجل بالتغييرات عن آخر جرد.' : 'On save, a log of changes since the last count is appended.'}>
+            <textarea id="mc-notes" className="textarea" rows={4} value={formData.notes} onChange={(e) => setTop('notes', e.target.value)} placeholder={t('materialsReportNotes')} />
+          </Field>
+        </div>
+      </section>
+
+      <div className="form-actionbar">
+        {!editingId && (
+          <button type="button" className="btn btn--ghost" onClick={onClear}>
+            {isAr ? 'نموذج فارغ' : 'Empty form'}
+          </button>
+        )}
+        <button type="button" className="btn btn--secondary" onClick={() => onPrint(null)}>
+          <FileText size={18} aria-hidden="true" />
+          <span className="btn-label-wide">{isAr ? 'معاينة ' : 'Preview '}</span>PDF
+        </button>
+        <button type="submit" className="btn btn--primary" aria-busy={saving}>
+          <Save size={18} aria-hidden="true" />
+          {editingId ? t('updateReport') : t('submitReport')}
+        </button>
+      </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        lang={lang}
+        danger={false}
+        title={isAr ? 'البدء بنموذج فارغ' : 'Start with an empty form'}
+        message={isAr ? 'ستُمسح القيم الحالية والمسودة المحفوظة على هذا الجهاز.' : 'Current values and the saved draft on this device will be cleared.'}
+        confirmLabel={isAr ? 'تفريغ النموذج' : 'Clear form'}
+        onConfirm={onConfirmClear}
+        onClose={onCancelClear}
+      />
+    </form>
+  );
+}
+
+// ── PDF ───────────────────────────────────────────────────────────────────
+
+function buildConsumptionReport(report, section, t, lang) {
+  const isAr = lang === 'ar';
+  const show = (key) => !section || section === key;
+  const itemsTable = (items) => h.table({
+    columns: [
+      { label: isAr ? 'المادة' : 'Material' },
+      { label: isAr ? 'الكمية المسحوبة' : 'Drawn', align: 'center', width: '35mm' },
+      { label: isAr ? 'الكمية المتبقية' : 'Remaining', align: 'center', width: '35mm' },
+    ],
+    rows: Object.entries(items || {})
+      .filter(([k, v]) => isItemKey(k) && v && typeof v === 'object')
+      .map(([k, v]) => {
+        const thresh = DEFAULT_THRESHOLDS[k];
+        const rem = parseFloat(v.remaining);
+        const low = thresh !== undefined && !Number.isNaN(rem) && rem <= thresh;
+        return [LABELS[k] || t(k), v.pulled || '-', { v: v.remaining || '-', tone: low ? 'warn' : undefined, strong: low }];
+      }),
+  });
+
+  const tot = marbleTotals(report);
+  const marbleRows = [];
+  ZONES.forEach(zone => {
+    marbleRows.push({ group: `${isAr ? 'زون' : 'Zone'} ${ZONE_NAMES[zone]}` });
+    ['white', 'brown'].forEach(color => {
+      const d = report.marble?.[zone]?.[color] || {};
+      marbleRows.push([
+        color === 'white' ? (isAr ? 'مرمر أبيض' : 'White marble') : (isAr ? 'مرمر جوزي' : 'Walnut marble'),
+        { v: parseInt(d.skiliat, 10) || 0, align: 'center' },
+        { v: d.pieces_per_skilia || 198, align: 'center' },
+        { v: parseInt(d.loose, 10) || 0, align: 'center' },
+        { v: num(parseInt(d.total, 10) || 0), align: 'center', strong: true },
+      ]);
+    });
+  });
+
+  let index = 0;
+  const next = () => { index += 1; return index; };
+  const parts = [];
+
+  if (show('basics')) {
+    parts.push(h.section(SECTION_TITLES.basics[isAr ? 'ar' : 'en'], h.raw(`${itemsTable(report.basics)}${h.notes(isAr ? 'ملاحظات القسم' : 'Notes', report.basics_notes)}`), { index: next() }));
+  }
+  if (show('marble')) {
+    parts.push(h.section(SECTION_TITLES.marble[isAr ? 'ar' : 'en'], h.raw(`${h.table({
+      columns: [
+        { label: isAr ? 'النوع' : 'Type' },
+        { label: isAr ? 'السكيبات' : 'Pallets', align: 'center' },
+        { label: isAr ? 'قطع/سكيبة' : 'Pcs/pallet', align: 'center' },
+        { label: isAr ? 'الفرط' : 'Loose', align: 'center' },
+        { label: isAr ? 'المجموع' : 'Total', align: 'center' },
+      ],
+      rows: marbleRows,
+      foot: [
+        { v: isAr ? 'الإجمالي (أبيض / جوزي)' : 'Total (white / walnut)', strong: true },
+        `${tot.whiteSk} / ${tot.brownSk}`, '-', `${tot.whiteLoose} / ${tot.brownLoose}`,
+        `${num(tot.white)} / ${num(tot.brown)}`,
+      ],
+    })}${h.notes(isAr ? 'ملاحظات القسم' : 'Notes', report.marble_notes)}`), { index: next() }));
+  }
+  if (show('sealants')) {
+    parts.push(h.section(SECTION_TITLES.sealants[isAr ? 'ar' : 'en'], h.raw(`${itemsTable(report.sealants)}${h.notes(isAr ? 'ملاحظات القسم' : 'Notes', report.sealants_notes)}`), { index: next() }));
+  }
+  if (show('bulk')) {
+    parts.push(h.section(SECTION_TITLES.bulk[isAr ? 'ar' : 'en'], h.raw(`${h.kpis([
+      { label: isAr ? 'الأسمنت (كيس)' : 'Cement (bags)', value: report.bulk?.cement || '-' },
+      { label: isAr ? 'الرمل' : 'Sand', value: report.bulk?.sand || '-' },
+      { label: isAr ? 'الفوم (مسحوب / متبقي)' : 'Foam (drawn / left)', value: `${report.bulk?.foam?.pulled || '-'} / ${report.bulk?.foam?.remaining || '-'}` },
+    ])}${h.notes(isAr ? 'ملاحظات القسم' : 'Notes', report.bulk_notes)}`), { index: next() }));
+  }
+  if (!section && report.notes) {
+    parts.push(h.notes(isAr ? 'ملاحظات عامة وسجل التعديلات' : 'General notes & change log', report.notes));
+  }
+  if (report.site_images?.length) {
+    parts.push(h.section(isAr ? 'التوثيق الميداني بالصور' : 'Site photos', h.raw(`
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3mm;break-inside:avoid;">
+        ${report.site_images.map(src => `<div style="height:42mm;border:1px solid #d4d4d8;border-radius:2mm;overflow:hidden;"><img src="${h.text(src).html}" style="width:100%;height:100%;object-fit:cover;" alt=""></div>`).join('')}
+      </div>`), { index: next() }));
+  }
+
+  return buildReport({
+    lang,
+    title: section ? SECTION_TITLES[section][isAr ? 'ar' : 'en'] : (isAr ? 'تقرير جرد واستهلاك المواد اليومي' : 'Daily Materials Count & Consumption'),
+    subtitle: `${report.day || ''} ${report.date || ''}`.trim(),
+    code: `MAT-${report.date || ''}`,
+    meta: [
+      { label: isAr ? 'التاريخ' : 'Date', value: report.date || '-' },
+      { label: isAr ? 'اليوم' : 'Day', value: report.day || '-' },
+      { label: isAr ? 'وقت المباشرة' : 'Start', value: report.start_time || '-' },
+      { label: isAr ? 'وقت الانتهاء' : 'End', value: report.end_time || '-' },
+      { label: isAr ? 'معد التقرير' : 'Prepared by', value: report.prepared_by || '-' },
+    ],
+    body: parts.map(String).join(''),
+    signatures: [
+      { ar: 'مشرف الموقع', en: 'Site Supervisor' },
+      { ar: 'المعاون الفني', en: 'Technical Assistant' },
+      { ar: 'معد التقرير', en: 'Prepared by', name: report.prepared_by || '' },
+    ],
+  });
 }

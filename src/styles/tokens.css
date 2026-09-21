@@ -1,0 +1,214 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Design tokens — the single source for every color, size and timing in
+   the app. Pages and components reference these variables only.
+
+   Palette: zinc neutrals + one emerald accent (brand lock).
+   Every text/background pair below is measured against WCAG 2.2 AA
+   (4.5:1 text, 3:1 UI) in both themes.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg:          #f5f5f6;   /* page */
+  --surface:     #ffffff;   /* cards, sheets */
+  --surface-2:   #f4f4f5;   /* subtle fills: table head, inputs, chips */
+  --surface-3:   #e9e9ec;   /* hover on subtle fills */
+  --overlay:     rgb(9 9 11 / 0.5);
+
+  /* Text */
+  --fg:   #18181b;          /* primary      17.7:1 on surface */
+  --fg-2: #3f3f46;          /* secondary    10.4:1 */
+  --fg-3: #63636e;          /* muted         5.9:1 (4.9:1 on surface-3) */
+
+  /* Lines */
+  --border:        #e4e4e7; /* decorative dividers and card edges */
+  --border-strong: #8a8a94; /* control outlines, 3.4:1 */
+
+  /* Accent (emerald) */
+  --accent:          #047857; /* text + icons, 5.5:1 */
+  --accent-solid:    #047857; /* filled buttons */
+  --accent-solid-hover: #065f46;
+  --accent-on:       #ffffff; /* text on solid, 5.5:1 */
+  --accent-soft:     #e6f4ee; /* selected rows, soft badges */
+  --accent-soft-fg:  #065f46;
+
+  /* Status */
+  --success:      #047857;  --success-soft: #e6f4ee;
+  --warn:         #b45309;  --warn-soft:    #fdf6ea;
+  --danger:       #b91c1c;  --danger-soft:  #fbeaea;
+  --danger-solid: #b91c1c;  --danger-solid-hover: #991b1b;
+  --info:         #0369a1;  --info-soft:    #e5f1f8;
+
+  /* Data visualisation */
+  --viz-white:  #8a8a94;   /* "white" marble, 3.4:1 on surface */
+  --viz-brown:  #a16207;   /* walnut marble, 4.9:1 on surface */
+  --viz-track:  #ececef;
+
+  /* Typography */
+  --font-ar:   'Cairo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-en:   'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font:      var(--font-ar);
+
+  --text-xs:   0.75rem;   /* 12 */
+  --text-sm:   0.875rem;  /* 14 */
+  --text-base: 1rem;      /* 16 */
+  --text-lg:   1.125rem;  /* 18 */
+  --text-xl:   1.25rem;   /* 20 */
+  --text-2xl:  1.5rem;    /* 24 */
+  --text-3xl:  1.875rem;  /* 30 */
+  --text-4xl:  2.25rem;   /* 36 */
+
+  --leading-tight: 1.25;
+  --leading-snug:  1.4;
+  --leading-body:  1.6;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-black:    800;
+
+  /* Spacing (4px base) */
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-5:  1.25rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  --page-gutter: var(--space-4);   /* grows on larger screens */
+  --section-gap: var(--space-5);
+  --card-pad:    var(--space-4);
+
+  /* Radii — one soft language across the app */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   20px;
+  --radius-pill: 999px;
+
+  /* Elevation — most surfaces are flat; shadows only for floating layers */
+  --shadow-sm:  0 1px 2px rgb(24 24 27 / 0.06);
+  --shadow-md:  0 4px 16px rgb(24 24 27 / 0.08), 0 1px 3px rgb(24 24 27 / 0.06);
+  --shadow-lg:  0 16px 48px rgb(24 24 27 / 0.16), 0 4px 12px rgb(24 24 27 / 0.08);
+
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+
+  /* Sizing */
+  --control-h:     2.75rem;  /* 44px: comfortable touch target */
+  --control-h-sm:  2.25rem;  /* 36px */
+  --icon-btn:      2.75rem;
+  --topbar-h:      4rem;
+  --bottom-nav-h:  4.25rem;
+  --sidebar-w:     16.5rem;
+  --sidebar-w-collapsed: 4.75rem;
+  --content-max:   90rem;
+
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-start:  env(safe-area-inset-left, 0px);
+  --safe-end:    env(safe-area-inset-right, 0px);
+
+  /* Fine sizes: hairline accents, small offsets, icon glyph parts */
+  --size-2: 2px;
+  --size-3: 3px;
+  --size-4: 4px;
+  --size-5: 5px;
+  --size-6: 6px;
+  --size-8: 8px;
+
+  /* Frosted layers */
+  --blur-sm: 12px;
+  --blur-md: 14px;
+  --blur-lg: 16px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-spin:      700ms;
+  --dur-spin-slow: 800ms;
+  --dur-pulse:     1200ms;
+  --dur-shimmer:   1400ms;
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Layers */
+  --z-sticky:  20;
+  --z-nav:     40;
+  --z-drawer:  60;
+  --z-modal:   80;
+  --z-toast:   100;
+}
+
+/* Dark theme, applied by the theme toggle (App sets data-theme on <html>). */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:        #0a0a0c;
+  --surface:   #141417;
+  --surface-2: #1c1c21;
+  --surface-3: #26262c;
+  --overlay:   rgb(0 0 0 / 0.62);
+
+  --fg:   #f4f4f5;
+  --fg-2: #d4d4d8;
+  --fg-3: #a1a1aa;
+
+  --border:        #26262c;
+  --border-strong: #6e6e78;
+
+  --accent:             #34d399;
+  --accent-solid:       #10b981;
+  --accent-solid-hover: #34d399;
+  --accent-on:          #04130d;
+  --accent-soft:        #0f2a21;
+  --accent-soft-fg:     #6ee7b7;
+
+  --success:      #34d399;  --success-soft: #0f2a21;
+  --warn:         #fbbf24;  --warn-soft:    #2a2110;
+  --danger:       #f87171;  --danger-soft:  #2c1618;
+  --danger-solid: #dc2626;  --danger-solid-hover: #b91c1c;
+  --info:         #38bdf8;  --info-soft:    #0c2230;
+
+  --viz-white:  #d4d4d8;
+  --viz-brown:  #d97706;
+  --viz-track:  #26262c;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 6px 20px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 20px 56px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.35);
+}
+
+/* English layout switches the UI face. */
+[dir="ltr"] { --font: var(--font-en); }
+
+@media (min-width: 768px) {
+  :root {
+    --page-gutter: var(--space-6);
+    --section-gap: var(--space-6);
+    --card-pad:    var(--space-5);
+  }
+}
+
+/* Mouse and trackpad users get slightly denser controls; touch keeps 44px. */
+@media (min-width: 768px) and (pointer: fine) {
+  :root {
+    --control-h: 2.5rem;
+    --icon-btn:  2.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --page-gutter: var(--space-8);
+    --card-pad:    var(--space-6);
+  }
+}

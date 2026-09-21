@@ -1,21 +1,25 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Construction, CheckCircle2, ShieldAlert, Loader2, Info } from 'lucide-react';
-import { exportToExcel, exportToPDF } from './utils/exportUtils';
+import { useCallback, useEffect, useState, Suspense, lazy } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import { exportToExcel } from './utils/exportUtils';
 import dictionary, { translateText } from './utils/translations';
+import {
+  apiFetch, getToken, getStoredUser, setSession, clearSession, setUnauthorizedHandler
+} from './utils/api';
+import { toast } from './utils/toast';
+import { findSection, sectionsFor } from './navigation';
+import { ORG } from './config/org';
+import companyLogo from './assets/company-logo.webp';
 
-// Static Critical Components
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './components/Login';
 import LandingPage from './components/LandingPage';
 import MobileBottomNav from './components/MobileBottomNav';
-import companyLogo from './assets/company-logo.webp';
-import {
-  apiFetch, getToken, getStoredUser, setSession, clearSession, setUnauthorizedHandler
-} from './utils/api';
+import ToastHost from './components/ui/ToastHost';
+import ReportHost from './components/ui/ReportHost';
+import { LoadingBlock } from './components/ui';
 
-// Lazy-Loaded Tab Modules for Optimal Performance
+// Sections load on demand.
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const TrackingLogs = lazy(() => import('./components/TrackingLogs'));
 const MaterialsReport = lazy(() => import('./components/MaterialsReport'));
@@ -27,75 +31,78 @@ const UsersManagement = lazy(() => import('./components/UsersManagement'));
 const ExecutiveSummary = lazy(() => import('./components/ExecutiveSummary'));
 const MarblexProgress = lazy(() => import('./components/MarblexProgress'));
 
-// Sleek Component Loading Fallback
-function TabSkeletonLoader({ t }) {
-  return (
-    <div className="tab-skeleton-container" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="skeleton-card" style={{ height: '110px', borderRadius: 'var(--radius-lg)', background: 'var(--surface-warm)', border: '1px solid var(--border)', animation: 'pulse 1.5s infinite ease-in-out' }} />
-        ))}
-      </div>
-      <div className="skeleton-panel" style={{ height: '350px', borderRadius: 'var(--radius-xl)', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
-        <Loader2 size={32} className="spin-animation" style={{ color: 'var(--accent)' }} />
-        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--muted)' }}>{t('loading')}</span>
-      </div>
-    </div>
-  );
-}
+const DEFAULT_TAB = 'dashboard';
+
+// The open section lives in the URL hash, so reloads keep the place and the
+// phone's back button moves between sections.
+const tabFromHash = () => {
+  const id = window.location.hash.replace(/^#\/?/, '');
+  return findSection(id) ? id : DEFAULT_TAB;
+};
+
+const readPref = (key, fallback) => {
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+};
+
+const writePref = (key, value) => {
+  try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+};
 
 export default function App() {
   // A stored user is only a display hint until /api/me confirms it. With no
-  // token there is no session — never fall back to a default account.
+  // token there is no session: never fall back to a default account.
   const [user, setUser] = useState(() => (getToken() ? getStoredUser() : null));
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState(tabFromHash);
+  const [collapsed, setCollapsed] = useState(() => readPref('project_sidebar', 'open') === 'collapsed');
   const [showLogin, setShowLogin] = useState(false);
-  
-  // Global Toast Notification
-  const [toast, setToast] = useState(null);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type, id: Date.now() });
-    setTimeout(() => {
-      setToast(prev => (prev?.id === toast?.id ? null : prev));
-    }, 3500);
-  };
-  
-  // Theme & Language State
-  const [lang, setLang] = useState(() => localStorage.getItem('project_lang') || 'ar');
-  const [theme, setTheme] = useState(() => localStorage.getItem('project_theme') || 'dark');
+  const [lang, setLang] = useState(() => readPref('project_lang', 'ar'));
+  const [theme, setTheme] = useState(() => readPref('project_theme', 'dark'));
+
+  const isAr = lang === 'ar';
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('project_theme', theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0a0a0c' : '#f5f5f6');
+    writePref('project_theme', theme);
   }, [theme]);
 
   useEffect(() => {
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
-    localStorage.setItem('project_lang', lang);
-  }, [lang]);
+    document.documentElement.dir = isAr ? 'rtl' : 'ltr';
+    document.documentElement.lang = isAr ? 'ar' : 'en';
+    writePref('project_lang', lang);
+  }, [lang, isAr]);
 
-  const t = (key) => {
-    return dictionary[lang]?.[key] || key;
-  };
-  
-  // Data State
+  useEffect(() => {
+    writePref('project_sidebar', collapsed ? 'collapsed' : 'open');
+  }, [collapsed]);
+
+  useEffect(() => {
+    const onHash = () => setActiveTab(tabFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const navigate = useCallback((id) => {
+    if (window.location.hash !== `#${id}`) window.location.hash = id;
+    setActiveTab(id);
+    window.scrollTo({ top: 0 });
+  }, []);
+
+  const t = (key) => dictionary[lang]?.[key] || key;
+
+  // Data shared by several sections.
   const [kpis, setKpis] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [categories, setCategories] = useState([]);
   const [nazalat, setNazalat] = useState([]);
   const [marble, setMarble] = useState([]);
-  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Fetch all core project data
-  const fetchData = async () => {
-    setLoading(true);
-    setError('');
+  // Loads the shared data. Sets state only after the network answers, so it can
+  // run from an effect; fetchData() adds the loading indicator for manual refresh.
+  const loadData = async () => {
     try {
       const [dashRes, nazalatRes, marbleRes] = await Promise.all([
         apiFetch('/api/dashboard'),
@@ -103,27 +110,42 @@ export default function App() {
         apiFetch('/api/marble')
       ]);
 
-      if (!dashRes.ok) throw new Error('فشل جلب بيانات لوحة التحكم.');
-      if (!nazalatRes.ok) throw new Error('فشل جلب سجل النزلات.');
-      if (!marbleRes.ok) throw new Error('فشل جلب سجل توزيع المرمر.');
+      if (!dashRes.ok) throw new Error(isAr ? 'تعذر تحميل بيانات لوحة التحكم.' : 'Could not load dashboard data.');
+      if (!nazalatRes.ok) throw new Error(isAr ? 'تعذر تحميل سجل النزلات.' : 'Could not load the downspouts log.');
+      if (!marbleRes.ok) throw new Error(isAr ? 'تعذر تحميل توزيع المرمر.' : 'Could not load marble distribution.');
 
       const [dashData, nazalatData, marbleData] = await Promise.all([
         dashRes.json(),
         nazalatRes.json(),
         marbleRes.json()
       ]);
-      
+
       setKpis(dashData.kpis);
       setTasks(dashData.tasks);
       setCategories(dashData.categories);
       setNazalat(nazalatData);
       setMarble(marbleData);
-
+      setError('');
     } catch (err) {
       console.error(err);
-      setError(err.message || 'تعذر الاتصال بالخادم.');
+      setError(err.message || (isAr ? 'تعذر الاتصال بالخادم.' : 'Could not reach the server.'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchData = () => {
+    setLoading(true);
+    setError('');
+    return loadData();
+  };
+
+  const refreshDashboard = async () => {
+    const dashRes = await apiFetch('/api/dashboard');
+    if (dashRes.ok) {
+      const dashData = await dashRes.json();
+      setKpis(dashData.kpis);
+      setTasks(dashData.tasks);
     }
   };
 
@@ -150,9 +172,7 @@ export default function App() {
     apiFetch('/api/me')
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
-        if (data?.user) {
-          setUser(prev => ({ ...prev, ...data.user }));
-        }
+        if (data?.user) setUser(prev => ({ ...prev, ...data.user }));
       })
       .catch(() => {
         // Network failure: keep the cached user; the next API call re-checks.
@@ -161,499 +181,260 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    fetchData();
+    Promise.resolve().then(loadData);
+    // loadData only depends on the session, which user.id identifies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const handleLoginSuccess = (loggedInUser, token) => {
     setSession(loggedInUser, token);
     setUser(loggedInUser);
-    showToast(lang === 'ar' ? `مرحباً بك، ${loggedInUser.name}` : `Welcome, ${loggedInUser.name}`);
+    toast.success(isAr ? `مرحباً بك، ${loggedInUser.name}` : `Welcome, ${loggedInUser.name}`);
   };
 
-  // Toggle Nazala Status (Admin only)
+  // ── Mutations shared through props ───────────────────────────────────────
+
   const handleToggleNazala = async (id) => {
     try {
-      const response = await apiFetch(`/api/nazalat/${id}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) throw new Error('فشل تحديث حالة النزلة.');
-      
-      setNazalat(prev => prev.map(n => {
-        if (n.id === id) {
-          const nextStatus = n.status === 'منجز' ? 'متبقي' : 'منجز';
-          return {
-            ...n,
-            status: nextStatus,
-            notes: nextStatus === 'منجز' ? 'مطابق لجرودات الموقع' : 'قيد التجهيز والعمل'
-          };
-        }
-        return n;
-      }));
+      const response = await apiFetch(`/api/nazalat/${id}/toggle`, { method: 'POST' });
+      if (!response.ok) throw new Error(isAr ? 'تعذر تحديث حالة النزلة.' : 'Could not update the downspout.');
 
-      // Update background dashboard data
-      const dashRes = await apiFetch('/api/dashboard');
-      if (dashRes.ok) {
-        const dashData = await dashRes.json();
-        setKpis(dashData.kpis);
-        setTasks(dashData.tasks);
-      }
-      showToast(lang === 'ar' ? 'تم تحديث حالة النزلة بنجاح' : 'Downspout status updated');
+      setNazalat(prev => prev.map(n => {
+        if (n.id !== id) return n;
+        const nextStatus = n.status === 'منجز' ? 'متبقي' : 'منجز';
+        return {
+          ...n,
+          status: nextStatus,
+          notes: nextStatus === 'منجز' ? 'مطابق لجرودات الموقع' : 'قيد التجهيز والعمل'
+        };
+      }));
+      await refreshDashboard();
+      toast.success(isAr ? 'تم تحديث حالة النزلة' : 'Downspout status updated');
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error(err.message);
     }
   };
 
-  // Update Nazala Details (Admin only)
   const handleUpdateNazalaDetails = async (id, details) => {
     try {
       const response = await apiFetch(`/api/nazalat/${id}/details`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(details)
       });
-      if (!response.ok) throw new Error('فشل تحديث تفاصيل النزلة.');
-      
-      setNazalat(prev => prev.map(n => n.id === id ? { ...n, ...details } : n));
-      
-      const dashRes = await apiFetch('/api/dashboard');
-      if (dashRes.ok) {
-        const dashData = await dashRes.json();
-        setKpis(dashData.kpis);
-        setTasks(dashData.tasks);
-      }
-      showToast(lang === 'ar' ? 'تم حفظ تفاصيل النزلة' : 'Downspout details saved');
+      if (!response.ok) throw new Error(isAr ? 'تعذر حفظ تفاصيل النزلة.' : 'Could not save downspout details.');
+
+      setNazalat(prev => prev.map(n => (n.id === id ? { ...n, ...details } : n)));
+      await refreshDashboard();
+      toast.success(isAr ? 'تم حفظ تفاصيل النزلة' : 'Downspout details saved');
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error(err.message);
+      throw err;
     }
   };
 
-  // Update Manual Task Progress (Admin only)
   const handleUpdateProgress = async (taskId, progressPercent, notes, completedQuantity) => {
     try {
       const response = await apiFetch(`/api/tasks/${taskId}/progress`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          progress_percent: progressPercent, 
+        body: JSON.stringify({
+          progress_percent: progressPercent,
           notes,
           completed_quantity: completedQuantity
         }),
       });
 
       if (!response.ok) {
-        let errMsg = 'فشل تحديث نسبة الإنجاز.';
+        let errMsg = isAr ? 'تعذر حفظ نسبة الإنجاز.' : 'Could not save progress.';
         try {
           const errJson = await response.json();
           if (errJson?.error) errMsg = errJson.error;
-        } catch {}
+        } catch { /* no JSON body */ }
         throw new Error(errMsg);
       }
 
       await fetchData();
-      showToast(lang === 'ar' ? 'تم حفظ وتحديث نسبة الإنجاز' : 'Progress updated successfully');
+      toast.success(isAr ? 'تم حفظ نسبة الإنجاز' : 'Progress saved');
     } catch (err) {
-      showToast(err.message || 'فشل تحديث نسبة الإنجاز.', 'error');
+      toast.error(err.message);
       throw err;
     }
   };
 
-  // Update Marble Zone Field Status & Quantities (Admin only)
   const handleUpdateMarbleStatus = async (id, status, white_qty, brown_qty) => {
     try {
       const response = await apiFetch(`/api/marble/${id}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          status,
-          white_qty,
-          brown_qty
-        }),
+        body: JSON.stringify({ status, white_qty, brown_qty }),
       });
+      if (!response.ok) throw new Error(isAr ? 'تعذر تحديث موقف المرمر.' : 'Could not update marble status.');
 
-      if (!response.ok) throw new Error('فشل تحديث موقف وكميات المرمر.');
-      
-      setMarble(prev => prev.map(item => item.id === id ? { ...item, status, white_qty, brown_qty } : item));
-      
-      const dashRes = await apiFetch('/api/dashboard');
-      if (dashRes.ok) {
-        const dashData = await dashRes.json();
-        setKpis(dashData.kpis);
-        setTasks(dashData.tasks);
-      }
-      showToast(lang === 'ar' ? 'تم تحديث موقف المرمر' : 'Marble status updated');
+      setMarble(prev => prev.map(item => (item.id === id ? { ...item, status, white_qty, brown_qty } : item)));
+      await refreshDashboard();
+      toast.success(isAr ? 'تم تحديث موقف المرمر' : 'Marble status updated');
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error(err.message);
       throw err;
     }
   };
 
-  // Excel & PDF Exports
   const handleExcelExport = () => {
     exportToExcel({ tasks, nazalat, marble });
-    showToast(lang === 'ar' ? 'جاري تنزيل ملف Excel...' : 'Downloading Excel sheet...');
+    toast.info(isAr ? 'جارٍ تنزيل ملف Excel' : 'Downloading the Excel file');
   };
 
-  const handlePdfPrint = () => {
-    exportToPDF();
-  };
+  const handlePrintPage = () => window.print();
+
+  // ── Signed out ───────────────────────────────────────────────────────────
 
   if (!user) {
-    if (!showLogin) {
-      return (
-        <LandingPage 
-          onNavigateToLogin={() => setShowLogin(true)}
-          lang={lang} 
-          setLang={setLang} 
-          theme={theme} 
-          setTheme={setTheme} 
-        />
-      );
-    }
-
     return (
-      <Login 
-        onLoginSuccess={handleLoginSuccess} 
-        t={t} 
-        lang={lang} 
-        setLang={setLang} 
-        theme={theme} 
-        setTheme={setTheme} 
-      />
+      <>
+        {showLogin ? (
+          <Login onLoginSuccess={handleLoginSuccess} t={t} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} />
+        ) : (
+          <LandingPage onNavigateToLogin={() => setShowLogin(true)} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} />
+        )}
+        <ToastHost lang={lang} />
+      </>
     );
   }
 
-  const displayProjectName = t('projectName');
-  const displayReportTitle = lang === 'ar' ? 'تقرير الموقف الميداني ونسب الإنجاز' : 'Field Status & Progress Report';
-  const displayIssuedBy = t('issuedBy');
-  const displayReportDateLabel = t('reportDate');
+  // ── Signed in ────────────────────────────────────────────────────────────
+
+  // A section the current role may not open falls back to the dashboard.
+  const currentTab = sectionsFor(user).some(s => s.id === activeTab) ? activeTab : DEFAULT_TAB;
+  const section = findSection(currentTab);
+  const common = { user, t, lang };
+
+  const renderSection = () => {
+    switch (currentTab) {
+      case 'executive-summary':
+        return <ExecutiveSummary {...common} />;
+      case 'tracking':
+        return (
+          <TrackingLogs
+            {...common}
+            nazalat={nazalat}
+            loading={loading}
+            onToggleNazala={handleToggleNazala}
+            onUpdateNazalaDetails={handleUpdateNazalaDetails}
+            translateText={translateText}
+          />
+        );
+      case 'marble':
+        return (
+          <MaterialsReport
+            {...common}
+            marble={marble}
+            nazalat={nazalat}
+            onUpdateMarbleStatus={handleUpdateMarbleStatus}
+            translateText={translateText}
+          />
+        );
+      case 'marblex':
+        return <MarblexProgress {...common} />;
+      case 'materials-consumption':
+        return <MaterialsConsumption {...common} />;
+      case 'workers-wages':
+        return <WorkersWages {...common} />;
+      case 'weekly-advance':
+        return <WeeklyAdvance {...common} />;
+      case 'daily-updates':
+        return <DailyUpdates {...common} />;
+      case 'users-management':
+        return <UsersManagement currentUser={user} t={t} lang={lang} />;
+      case 'dashboard':
+      default:
+        return (
+          <Dashboard
+            {...common}
+            kpis={kpis}
+            tasks={tasks}
+            categories={categories}
+            onUpdateProgress={handleUpdateProgress}
+            translateText={translateText}
+          />
+        );
+    }
+  };
+
+  // The dashboard and the two field logs need the shared data before they render.
+  const needsSharedData = ['dashboard', 'tracking', 'marble'].includes(currentTab);
 
   return (
-    <div
-      className="app-container"
-      style={{ background: 'var(--bg-1)' }}
-    >
-      {/* Ambient background glow */}
-      <div
-        aria-hidden
-        style={{
-          position: 'fixed',
-          top: '-25vw',
-          right: '-10vw',
-          width: '50vw',
-          height: '50vw',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(5,150,105,0.10) 0%, transparent 68%)',
-          filter: 'blur(60px)',
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
-      />
+    <div className="app" data-collapsed={collapsed ? 'true' : 'false'}>
+      <a className="skip-link" href="#main">{isAr ? 'تخطي إلى المحتوى' : 'Skip to content'}</a>
 
-      {/* Global Toast Notification */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`global-toast-notification toast-${toast.type}`}
-            style={{
-              position: 'fixed',
-              top: '1rem',
-              right: lang === 'ar' ? '1.5rem' : 'auto',
-              left: lang === 'ar' ? 'auto' : '1.5rem',
-              zIndex: 9999,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.65rem',
-              padding: '0.75rem 1.25rem',
-              borderRadius: 'var(--radius-lg)',
-              background: 'var(--surface-solid)',
-              border: `1px solid ${toast.type === 'error' ? 'var(--danger)' : 'var(--accent)'}`,
-              boxShadow: 'var(--shadow-lg)',
-              color: 'var(--fg)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: '600'
-            }}
-          >
-            {toast.type === 'error' ? (
-              <ShieldAlert size={18} style={{ color: 'var(--danger)' }} />
-            ) : (
-              <CheckCircle2 size={18} style={{ color: 'var(--accent)' }} />
-            )}
-            <span>{toast.message}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Print header for physical document exports */}
-      <div className="print-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="print-logo" style={{ width: '48px', height: '48px', background: '#fff', padding: '4px', borderRadius: '8px' }}>
-            <img src={companyLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: '800' }}>{displayProjectName}</h2>
-            <p style={{ fontSize: '0.8rem', color: '#555' }}>{displayReportTitle}</p>
-          </div>
-        </div>
-        <div style={{ textAlign: 'left', fontSize: '0.85rem', color: '#555' }}>
-          <p>{displayReportDateLabel}: {new Date().toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US')}</p>
-          <p>{t('issuedBy')}: {displayIssuedBy}</p>
-        </div>
-      </div>
-
-      {mobileMenuOpen && (
-        <div 
-          className="sidebar-overlay"
-          onClick={() => setMobileMenuOpen(false)}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.45)',
-            backdropFilter: 'blur(6px)',
-            zIndex: 99,
-          }}
-        />
-      )}
-
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        collapsed={collapsed} 
+      <Sidebar
+        activeTab={currentTab}
+        onNavigate={navigate}
+        collapsed={collapsed}
         setCollapsed={setCollapsed}
         user={user}
         onLogout={handleLogout}
         t={t}
         lang={lang}
-        mobileOpen={mobileMenuOpen}
-        setMobileOpen={setMobileMenuOpen}
       />
 
-      <div className={`main-content ${collapsed ? 'collapsed' : ''}`}>
-        <Header 
-          activeTab={activeTab} 
-          user={user} 
-          onExcelExport={handleExcelExport}
-          onPdfPrint={handlePdfPrint}
-          onRefresh={fetchData}
+      <div className="app-main">
+        <Header
+          section={section}
+          user={user}
           t={t}
           lang={lang}
           setLang={setLang}
           theme={theme}
           setTheme={setTheme}
-          onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
+          onRefresh={fetchData}
+          refreshing={loading && Boolean(kpis)}
+          onExcelExport={handleExcelExport}
+          onPrintPage={handlePrintPage}
+          onLogout={handleLogout}
         />
 
-        {error && (
-          <div className="glass-panel" style={{ borderColor: 'var(--danger)', background: 'rgba(220, 38, 38, 0.06)', display: 'flex', alignItems: 'center', gap: '1rem', margin: '1rem 0' }}>
-            <ShieldAlert style={{ color: 'var(--danger)' }} />
-            <span style={{ color: 'var(--danger)', fontWeight: '600' }}>{error}</span>
-            <button onClick={fetchData} className="btn btn-secondary" style={{ marginRight: 'auto', padding: '0.4rem 0.8rem' }}>
-              {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-            </button>
+        <main id="main" className="page" tabIndex={-1}>
+          <div className="print-letterhead" aria-hidden="true">
+            <div>
+              <h2>{section ? t(section.titleKey) : ''}</h2>
+              <p>{ORG.company} · {isAr ? ORG.project.ar : ORG.project.en}</p>
+            </div>
+            <img src={companyLogo} alt="" />
           </div>
-        )}
+          {error && (
+            <div className="alert alert--danger" role="alert" style={{ marginBlockEnd: 'var(--section-gap)' }}>
+              <AlertTriangle size={18} aria-hidden="true" />
+              <div className="alert-body">{error}</div>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={fetchData}>
+                {isAr ? 'إعادة المحاولة' : 'Retry'}
+              </button>
+            </div>
+          )}
 
-        {loading && !kpis ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', flexDirection: 'column', gap: '1.25rem' }}>
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-            >
-              <Construction size={36} style={{ color: 'var(--accent)' }} />
-            </motion.div>
-            <p style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>{t('loading')}</p>
-          </div>
-        ) : (
-          <Suspense fallback={<TabSkeletonLoader t={t} />}>
-            <AnimatePresence mode="wait">
-              {activeTab === 'executive-summary' && (
-                <motion.div
-                  key="executive-summary"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <ExecutiveSummary lang={lang} t={t} />
-                </motion.div>
-              )}
-
-              {activeTab === 'dashboard' && (
-                <motion.div
-                  key="dashboard"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <Dashboard 
-                    kpis={kpis} 
-                    tasks={tasks} 
-                    categories={categories} 
-                    user={user}
-                    onUpdateProgress={handleUpdateProgress}
-                    onUpdateNotes={handleUpdateProgress}
-                    t={t}
-                    lang={lang}
-                    translateText={translateText}
-                  />
-                </motion.div>
-              )}
-              
-              {activeTab === 'tracking' && (
-                <motion.div
-                  key="tracking"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <TrackingLogs 
-                    nazalat={nazalat} 
-                    user={user}
-                    onToggleNazala={handleToggleNazala}
-                    onUpdateNazalaDetails={handleUpdateNazalaDetails}
-                    loading={loading}
-                    t={t}
-                    lang={lang}
-                    translateText={translateText}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'marble' && (
-                <motion.div
-                  key="marble"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <MaterialsReport 
-                    marble={marble}
-                    nazalat={nazalat}
-                    user={user}
-                    onUpdateMarbleStatus={handleUpdateMarbleStatus}
-                    t={t}
-                    lang={lang}
-                    translateText={translateText}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'marblex' && (
-                <motion.div
-                  key="marblex"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <MarblexProgress 
-                    user={user}
-                    lang={lang}
-                    t={t}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'materials-consumption' && (
-                <motion.div
-                  key="materials-consumption"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <MaterialsConsumption 
-                    user={user}
-                    t={t}
-                    lang={lang}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'workers-wages' && (
-                <motion.div
-                  key="workers-wages"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <WorkersWages 
-                    user={user}
-                    t={t}
-                    lang={lang}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'weekly-advance' && (
-                <motion.div
-                  key="weekly-advance"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <WeeklyAdvance
-                    user={user}
-                    t={t}
-                    lang={lang}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'daily-updates' && (
-                <motion.div
-                  key="daily-updates"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <DailyUpdates 
-                    user={user}
-                    t={t}
-                    lang={lang}
-                  />
-                </motion.div>
-              )}
-
-              {activeTab === 'users-management' && (
-                <motion.div
-                  key="users-management"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <UsersManagement 
-                    currentUser={user}
-                    t={t}
-                    lang={lang}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </Suspense>
-        )}
-
-        {/* Mobile Bottom Navigation */}
-        <MobileBottomNav
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          lang={lang}
-          user={user}
-        />
+          {needsSharedData && loading && !kpis ? (
+            <LoadingBlock label={t('loading')} />
+          ) : (
+            <Suspense fallback={<LoadingBlock label={t('loading')} />}>
+              <div key={currentTab} className="page-enter">
+                {renderSection()}
+              </div>
+            </Suspense>
+          )}
+        </main>
       </div>
+
+      <MobileBottomNav
+        activeTab={currentTab}
+        onNavigate={navigate}
+        lang={lang}
+        setLang={setLang}
+        theme={theme}
+        setTheme={setTheme}
+        user={user}
+        onLogout={handleLogout}
+      />
+
+      <ToastHost lang={lang} />
+      <ReportHost lang={lang} />
     </div>
   );
 }

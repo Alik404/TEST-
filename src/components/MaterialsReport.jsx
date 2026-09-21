@@ -1,469 +1,284 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Layers, CheckCircle2, AlertCircle, Save, Printer } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Layers, CheckCircle2, AlertCircle, Save, Printer, Pencil } from 'lucide-react';
+import { num } from '../utils/format';
+import { buildReport, openReport, h, docCode } from '../utils/report';
+import { canEdit } from '../navigation';
+import { StatCard, Modal, Field } from './ui';
+
+const ZONES = ['Zone A', 'Zone B', 'Zone C'];
+const PALLET = 198; // pieces per pallet (سكيبة)
+
+const zoneLabel = (zone, isAr) => (isAr ? zone.replace('Zone', 'المنطقة') : zone);
+const palletText = (total, isAr) => (isAr
+  ? `${num(Math.floor(total / PALLET))} سكيبة · ${num(total % PALLET)} فرط`
+  : `${num(Math.floor(total / PALLET))} pallets · ${num(total % PALLET)} loose`);
+const isSettled = (s) => Boolean(s) && (s.includes('مكتمل') || s.includes('Completed') || s.includes('مستقر'));
+const rowTotal = (i) => (i.white_qty !== null || i.brown_qty !== null ? (i.white_qty || 0) + (i.brown_qty || 0) : null);
 
 export default function MaterialsReport({ marble, user, onUpdateMarbleStatus, t, lang, translateText }) {
-  const [editingId, setEditingId] = useState(null);
-  const [tempStatus, setTempStatus] = useState('');
-  const [savingId, setSavingId] = useState(null);
-  const [tempWhite, setTempWhite] = useState('');
-  const [tempBrown, setTempBrown] = useState('');
+  const isAr = lang === 'ar';
+  const editable = canEdit(user);
+  const tr = (x) => translateText(x, lang);
+  const list = useMemo(() => (Array.isArray(marble) ? marble : []), [marble]);
+  const [editing, setEditing] = useState(null);
 
-  // Group by Zone
-  const zones = ['Zone A', 'Zone B', 'Zone C'];
+  const totals = useMemo(() => {
+    const white = list.reduce((s, i) => s + (i.white_qty || 0), 0);
+    const brown = list.reduce((s, i) => s + (i.brown_qty || 0), 0);
+    return { white, brown, all: white + brown };
+  }, [list]);
 
-  // Calculate totals
-  let totalWhite = 0;
-  let totalBrown = 0;
+  const zones = useMemo(() => ZONES.map(z => {
+    const items = list.filter(i => i.zone === z);
+    const white = items.reduce((s, i) => s + (i.white_qty || 0), 0);
+    const brown = items.reduce((s, i) => s + (i.brown_qty || 0), 0);
+    return { zone: z, items, white, brown };
+  }).filter(g => g.items.length), [list]);
 
-  marble.forEach(item => {
-    totalWhite += item.white_qty || 0;
-    totalBrown += item.brown_qty || 0;
+  const statusSuggestions = useMemo(() => [...new Set(list.map(i => i.status).filter(Boolean))], [list]);
+
+  const print = () => openReport(buildMarbleReport({ zones, totals, lang, tr }), {
+    title: isAr ? 'تقرير توزيع المرمر' : 'Marble distribution report',
   });
 
-  const grandTotal = totalWhite + totalBrown;
-
-  const handleEditClick = (item) => {
-    if (user.role !== 'admin' && user.role !== 'super_admin') return;
-    setEditingId(item.id);
-    setTempStatus(item.status || '');
-    setTempWhite(item.white_qty !== null ? String(item.white_qty) : '');
-    setTempBrown(item.brown_qty !== null ? String(item.brown_qty) : '');
-  };
-
-  const handleSaveClick = async (id) => {
-    setSavingId(id);
-    try {
-      const whiteVal = tempWhite === '' ? null : parseInt(tempWhite, 10);
-      const brownVal = tempBrown === '' ? null : parseInt(tempBrown, 10);
-      await onUpdateMarbleStatus(id, tempStatus, whiteVal, brownVal);
-      setEditingId(null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const textDirectionStyle = {
-    textAlign: lang === 'ar' ? 'right' : 'left'
-  };
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-  };
-
-  const handlePrintMarbleReport = () => {
-    let rows = '';
-    zones.forEach(zoneName => {
-      const zoneItems = marble.filter(item => item.zone === zoneName);
-      let zoneWhite = 0, zoneBrown = 0;
-      zoneItems.forEach(item => {
-        zoneWhite += item.white_qty || 0;
-        zoneBrown += item.brown_qty || 0;
-      });
-
-      rows += `<tr style="background:#f1f5f9;font-weight:bold">
-        <td colspan="2">${lang === 'ar' ? zoneName.replace('Zone', 'المنطقة') : zoneName}</td>
-        <td style="text-align:center">${zoneWhite || '-'}</td>
-        <td style="text-align:center">${zoneBrown || '-'}</td>
-        <td style="text-align:center">${(zoneWhite + zoneBrown) || '-'}</td>
-        <td></td>
-      </tr>`;
-
-      zoneItems.forEach(item => {
-        const white = item.white_qty !== null ? item.white_qty.toLocaleString() : '-';
-        const brown = item.brown_qty !== null ? item.brown_qty.toLocaleString() : '-';
-        const total = (item.white_qty || 0) + (item.brown_qty || 0);
-        
-        rows += `<tr>
-          <td>${item.zone}</td>
-          <td>${item.task_name}</td>
-          <td style="text-align:center">${white}</td>
-          <td style="text-align:center">${brown}</td>
-          <td style="text-align:center;font-weight:bold">${total > 0 ? total.toLocaleString() : '-'}</td>
-          <td>${item.status || ''}</td>
-        </tr>`;
-      });
-    });
-
-    const html = `<!DOCTYPE html>
-<html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}">
-<head>
-  <meta charset="UTF-8"/>
-  <title>تفاصيل توزيع المرمر</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Cairo', sans-serif; padding: 20px; color: #1e293b; }
-    h1 { text-align: center; color: #0f172a; margin-bottom: 5px; }
-    h3 { text-align: center; color: #475569; margin-top: 0; margin-bottom: 20px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-    th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: ${lang === 'ar' ? 'right' : 'left'}; }
-    th { background-color: #0f172a; color: white; font-weight: bold; text-align: center; }
-    .print-footer { display: flex; justify-content: space-between; margin-top: 50px; font-weight: bold; }
-    .signature-block { text-align: center; }
-    .totals-box { margin-bottom: 20px; padding: 15px; border: 2px solid #0f172a; border-radius: 8px; background: #f8fafc; display: flex; justify-content: space-around; font-weight: bold; font-size: 16px; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style>
-</head>
-<body>
-  <h1>مشروع الجندي المجهول</h1>
-  <h3>تفاصيل توزيع قطع المرمر حسب المناطق والألوان</h3>
-  
-  <div class="totals-box">
-    <div>إجمالي المرمر الأبيض: <span style="color:#16a34a">${totalWhite.toLocaleString()}</span> قطعة</div>
-    <div>إجمالي المرمر الجوزي: <span style="color:#b45309">${totalBrown.toLocaleString()}</span> قطعة</div>
-    <div>المجموع الكلي: <span style="color:#0f172a">${grandTotal.toLocaleString()}</span> قطعة</div>
-  </div>
-
-  <div style="text-align: left; margin-bottom: 10px; font-weight: bold;">تاريخ الإصدار: ${new Date().toLocaleDateString('en-GB')}</div>
-  <table>
-    <thead>
-      <tr>
-        <th>المنطقة (Zone)</th>
-        <th>طبيعة العمل</th>
-        <th>أبيض (قطعة)</th>
-        <th>جوزي (قطعة)</th>
-        <th>الإجمالي</th>
-        <th>الموقف الميداني</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div class="print-footer">
-    <div class="signature-block">المهندس المقيم<br/><br/>.......................</div>
-    <div class="signature-block">مدير المشروع<br/><br/>.......................</div>
-  </div>
-  <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); }</script>
-</body>
-</html>`;
-
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) {
-      const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'fixed';
-      printFrame.style.top = '-1000px';
-      printFrame.style.left = '-1000px';
-      printFrame.style.width = '1px';
-      printFrame.style.height = '1px';
-      printFrame.style.border = 'none';
-      document.body.appendChild(printFrame);
-
-      const frameDoc = printFrame.contentWindow.document;
-      frameDoc.open();
-      frameDoc.write(html.replace('window.close();', ''));
-      frameDoc.close();
-
-      setTimeout(() => {
-        document.body.removeChild(printFrame);
-      }, 15000);
-    } else {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.open();
-        printWindow.document.write(html);
-        printWindow.document.close();
-      } else {
-        const printFrame = document.createElement('iframe');
-        printFrame.style.position = 'fixed';
-        printFrame.style.top = '-1000px';
-        printFrame.style.left = '-1000px';
-        printFrame.style.width = '1px';
-        printFrame.style.height = '1px';
-        printFrame.style.border = 'none';
-        document.body.appendChild(printFrame);
-
-        const frameDoc = printFrame.contentWindow.document;
-        frameDoc.open();
-        frameDoc.write(html.replace('window.close();', ''));
-        frameDoc.close();
-
-        setTimeout(() => {
-          document.body.removeChild(printFrame);
-        }, 15000);
-      }
-    }
-  };
-
   return (
-    <motion.div 
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem' }}
-    >
-      
-      {/* 1. Marble Summary Cards */}
-        
-        {/* White Alabaster */}
-        <motion.div variants={itemVariants} className="glass-panel" style={{ gridColumn: 'span 4', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '4px solid #f8fafc' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.9rem', color: 'var(--muted)', fontWeight: '600' }}>{t('marbleWhiteTitle')}</span>
-            <div style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
-              <Layers size={20} style={{ color: 'var(--muted)' }} />
-            </div>
-          </div>
-          <div className="tabular-nums" style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--fg)', lineHeight: '1' }}>
-            {totalWhite.toLocaleString()}
-          </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 'bold' }}>
-              {lang === 'ar' 
-                ? `سكيبة: ${Math.floor(totalWhite / 198).toLocaleString()} (السكيبة 198 قطعة) | فرط: ${totalWhite % 198}` 
-                : `Pallets: ${Math.floor(totalWhite / 198).toLocaleString()} (198 pcs/pallet) | Loose: ${totalWhite % 198}`}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-              {lang === 'ar' ? 'القطع المطبقة ميدانياً' : 'Pieces applied in field'}
-            </div>
-        </motion.div>
+    <div className="stack">
+      <section className="stat-grid" aria-label={isAr ? 'ملخص المرمر' : 'Marble summary'}>
+        <StatCard className="stat--span2" label={t('marbleTotalTitle')} value={num(totals.all)} unit={isAr ? 'قطعة' : 'pcs'} icon={Layers} tone="accent" meta={palletText(totals.all, isAr)} />
+        <StatCard label={t('marbleWhiteTitle')} value={num(totals.white)} icon={Layers} meta={palletText(totals.white, isAr)} />
+        <StatCard label={t('marbleBrownTitle')} value={num(totals.brown)} icon={Layers} tone="warn" meta={palletText(totals.brown, isAr)} />
+      </section>
 
-        {/* Brown Alabaster */}
-        <motion.div variants={itemVariants} className="glass-panel" style={{ gridColumn: 'span 4', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '4px solid var(--accent)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.9rem', color: 'var(--muted)', fontWeight: '600' }}>{t('marbleBrownTitle')}</span>
-            <div style={{ padding: '0.5rem', background: 'rgba(168, 85, 247, 0.1)', borderRadius: '12px' }}>
-              <Layers size={20} style={{ color: 'var(--accent)' }} />
-            </div>
+      <section className="card">
+        <div className="card-header card-header--divided">
+          <div>
+            <h2 className="card-title">{t('tableMaterialsTitle')}</h2>
+            <p className="card-subtitle">
+              {editable
+                ? (isAr ? 'اضغط "تعديل" لتحديث الكميات والموقف الميداني.' : 'Use "Edit" to update quantities and field status.')
+                : (isAr ? `كل سكيبة ${PALLET} قطعة.` : `${PALLET} pieces per pallet.`)}
+            </p>
           </div>
-          <div className="tabular-nums" style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--fg)', lineHeight: '1' }}>
-            {totalBrown.toLocaleString()}
-          </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 'bold' }}>
-              {lang === 'ar' 
-                ? `سكيبة: ${Math.floor(totalBrown / 198).toLocaleString()} (السكيبة 198 قطعة) | فرط: ${totalBrown % 198}` 
-                : `Pallets: ${Math.floor(totalBrown / 198).toLocaleString()} (198 pcs/pallet) | Loose: ${totalBrown % 198}`}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-              {lang === 'ar' ? 'القطع المطبقة ميدانياً' : 'Pieces applied in field'}
-            </div>
-        </motion.div>
-
-        {/* Combined Grand Total */}
-        <motion.div variants={itemVariants} className="glass-panel" style={{ gridColumn: 'span 4', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '4px solid var(--success)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '0.9rem', color: 'var(--muted)', fontWeight: '600' }}>{t('marbleTotalTitle')}</span>
-            <div style={{ padding: '0.5rem', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px' }}>
-              <Layers size={20} style={{ color: 'var(--success)' }} />
-            </div>
-          </div>
-          <div className="tabular-nums" style={{ fontSize: '2rem', fontWeight: '800', color: 'var(--fg)', lineHeight: '1' }}>
-            {grandTotal.toLocaleString()}
-          </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 'bold' }}>
-              {lang === 'ar' 
-                ? `سكيبة: ${Math.floor(grandTotal / 198).toLocaleString()} (السكيبة 198 قطعة) | فرط: ${grandTotal % 198}` 
-                : `Pallets: ${Math.floor(grandTotal / 198).toLocaleString()} (198 pcs/pallet) | Loose: ${grandTotal % 198}`}
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-              {lang === 'ar' ? 'المجموع الكلي' : 'Grand total'}
-            </div>
-        </motion.div>
-
-      {/* 2. Detailed Distribution Table */}
-      <motion.div variants={itemVariants} className="glass-panel" style={{ gridColumn: 'span 12', padding: '0', overflowX: 'auto' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', width: '100%' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Layers size={20} style={{ color: 'var(--accent)' }} />
-              {t('tableMaterialsTitle')}
-            </h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              {(user.role === 'admin' || user.role === 'super_admin') && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
-                  {t('tableMaterialsInstruction')}
-                </span>
-              )}
-              <button
-                onClick={handlePrintMarbleReport}
-                className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', borderColor: 'rgba(16, 185, 129, 0.2)' }}
-              >
-                <Printer size={18} />
-                {lang === 'ar' ? 'طباعة / تصدير PDF' : 'Print PDF'}
-              </button>
-            </div>
-          </div>
+          <button type="button" className="btn btn--secondary" onClick={print}>
+            <Printer size={18} aria-hidden="true" />
+            {isAr ? 'تقرير PDF' : 'PDF report'}
+          </button>
         </div>
 
-        <div className="table-responsive" style={{ width: '100%' }}>
-            <table className="project-table" style={{ direction: lang === 'ar' ? 'rtl' : 'ltr' }}>
-              <thead>
-                <tr>
-                  <th style={{ width: '15%', ...textDirectionStyle }}>{t('colZoneName')}</th>
-                  <th style={{ width: '25%', ...textDirectionStyle }}>{t('colTaskNature')}</th>
-                  <th style={{ width: '12%', textAlign: 'center' }}>{t('colWhiteQty')}</th>
-                  <th style={{ width: '12%', textAlign: 'center' }}>{t('colBrownQty')}</th>
-                  <th style={{ width: '12%', textAlign: 'center' }}>{t('colTotal')}</th>
-                  <th style={{ width: '24%', ...textDirectionStyle }}>{t('colFieldStatus')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {zones.map((zoneName) => {
-                  const zoneItems = marble.filter(item => item.zone === zoneName);
-                  
-                  // Zone Totals
-                  let zoneWhite = 0, zoneBrown = 0;
-                  zoneItems.forEach(item => {
-                    zoneWhite += item.white_qty || 0;
-                    zoneBrown += item.brown_qty || 0;
-                  });
+        <div className="table-wrap">
+          <table className="dt dt--stack dt--stack3">
+            <thead>
+              <tr>
+                <th>{t('colTaskNature')}</th>
+                <th className="c-num">{t('colWhiteQty')}</th>
+                <th className="c-num">{t('colBrownQty')}</th>
+                <th className="c-num">{t('colTotal')}</th>
+                <th>{t('colFieldStatus')}</th>
+                {editable && <th className="c-actions"><span className="sr-only">{isAr ? 'إجراءات' : 'Actions'}</span></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {zones.map(g => (
+                <ZoneBlock key={g.zone} group={g} isAr={isAr} t={t} tr={tr} editable={editable} onEdit={setEditing} />
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className="c-full">{t('grandTotalCumulative')}</td>
+                <td className="c-num" data-label={isAr ? 'أبيض' : 'White'}><span className="num">{num(totals.white)}</span></td>
+                <td className="c-num" data-label={isAr ? 'جوزي' : 'Walnut'}><span className="num">{num(totals.brown)}</span></td>
+                <td className="c-num" data-label={isAr ? 'المجموع' : 'Total'}><span className="num text-accent">{num(totals.all)}</span></td>
+                <td className="c-hide-sm" colSpan={editable ? 2 : 1} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
 
-                  return (
-                    <React.Fragment key={zoneName}>
-                      {/* Zone Header Row */}
-                      <tr className="category-header-row" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                        <td colSpan="2" style={{ fontWeight: '800', ...textDirectionStyle }}>
-                          {lang === 'ar' ? zoneName.replace('Zone', 'المنطقة') : zoneName}
-                        </td>
-                        <td className="tabular-nums" style={{ textAlign: 'center', fontWeight: '800' }}>
-                          {zoneWhite > 0 ? zoneWhite.toLocaleString() : '-'}
-                        </td>
-                        <td className="tabular-nums" style={{ textAlign: 'center', fontWeight: '800' }}>
-                          {zoneBrown > 0 ? zoneBrown.toLocaleString() : '-'}
-                        </td>
-                        <td className="tabular-nums" style={{ textAlign: 'center', fontWeight: '800' }}>
-                          {(zoneWhite + zoneBrown) > 0 ? (zoneWhite + zoneBrown).toLocaleString() : '-'}
-                        </td>
-                        <td></td>
-                      </tr>
-
-                      {/* Zone Detail Rows */}
-                      {zoneItems.map((item) => {
-                        const hasQty = item.white_qty !== null || item.brown_qty !== null;
-                        const whiteDisplay = item.white_qty !== null ? item.white_qty.toLocaleString() : '-';
-                        const brownDisplay = item.brown_qty !== null ? item.brown_qty.toLocaleString() : '-';
-                        const totalDisplay = hasQty ? ((item.white_qty || 0) + (item.brown_qty || 0)).toLocaleString() : '-';
-                        
-                        const isEditing = editingId === item.id;
-
-                        return (
-                          <tr key={item.id}>
-                            <td style={{ color: 'var(--muted)', fontSize: '0.85rem', ...textDirectionStyle }}>
-                              {lang === 'ar' ? item.zone.replace('Zone', 'المنطقة') : item.zone}
-                            </td>
-                            <td style={{ fontWeight: '500', ...textDirectionStyle }}>
-                              {translateText(item.task_name, lang)}
-                            </td>
-                            <td className="tabular-nums" style={{ textAlign: 'center' }}>
-                              {isEditing ? (
-                                <input
-                                  type="number"
-                                  className="input-number"
-                                  value={tempWhite}
-                                  onChange={(e) => setTempWhite(e.target.value)}
-                                  disabled={savingId === item.id}
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={{ width: '70px', padding: '0.2rem', textAlign: 'center', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--fg)' }}
-                                />
-                              ) : (
-                                whiteDisplay
-                              )}
-                            </td>
-                            <td className="tabular-nums" style={{ textAlign: 'center' }}>
-                              {isEditing ? (
-                                <input
-                                  type="number"
-                                  className="input-number"
-                                  value={tempBrown}
-                                  onChange={(e) => setTempBrown(e.target.value)}
-                                  disabled={savingId === item.id}
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={{ width: '70px', padding: '0.2rem', textAlign: 'center', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--fg)' }}
-                                />
-                              ) : (
-                                brownDisplay
-                              )}
-                            </td>
-                            <td className="tabular-nums" style={{ textAlign: 'center', fontWeight: '600' }}>
-                              {isEditing ? (
-                                ((parseInt(tempWhite, 10) || 0) + (parseInt(tempBrown, 10) || 0)).toLocaleString()
-                              ) : (
-                                totalDisplay
-                              )}
-                            </td>
-                            <td 
-                              style={{ 
-                                ...textDirectionStyle, 
-                                cursor: (!isEditing && (user.role === 'admin' || user.role === 'super_admin')) ? 'pointer' : 'default' 
-                              }}
-                              onClick={() => !isEditing && (user.role === 'admin' || user.role === 'super_admin') && handleEditClick(item)}
-                            >
-                              {isEditing ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="text"
-                                    className="notes-input"
-                                    value={tempStatus}
-                                    onChange={(e) => setTempStatus(e.target.value)}
-                                    placeholder={t('enterFieldStatus')}
-                                    disabled={savingId === item.id}
-                                    style={{ borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)', fontSize: '0.85rem', color: 'var(--fg)' }}
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={() => handleSaveClick(item.id)}
-                                    className="btn btn-primary"
-                                    style={{ padding: '0.3rem', borderRadius: '4px' }}
-                                    disabled={savingId === item.id}
-                                  >
-                                    <Save size={14} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                  {item.status && (item.status.includes('مكتمل') || item.status.includes('Completed') || item.status.includes('مستقر')) ? (
-                                    <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                                  ) : (
-                                    <AlertCircle size={14} style={{ color: 'var(--warn)', flexShrink: 0 }} />
-                                  )}
-                                  <span>{translateText(item.status, lang) || t('notSpecifiedYet')}</span>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-                
-                {/* Grand Cumulative Total Row */}
-                <tr style={{ background: 'rgba(255,255,255,0.04)', borderTop: '2px solid var(--border)', fontWeight: '800' }}>
-                  <td style={textDirectionStyle}>{t('grandTotalCumulative')}</td>
-                  <td style={textDirectionStyle}>{t('allTasksAndZones')}</td>
-                  <td className="tabular-nums" style={{ textAlign: 'center', color: '#eef2f7' }}>
-                    {totalWhite.toLocaleString()}
-                  </td>
-                  <td className="tabular-nums" style={{ textAlign: 'center', color: 'var(--accent)' }}>
-                    {totalBrown.toLocaleString()}
-                  </td>
-                  <td className="tabular-nums" style={{ textAlign: 'center', color: 'var(--success)' }}>
-                    {grandTotal.toLocaleString()}
-                  </td>
-                  <td style={textDirectionStyle}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                      <CheckCircle2 size={14} style={{ color: 'var(--success)' }} />
-                      <span>
-                        {lang === 'ar' ? 'مسجل ومطبق بالكامل' : 'Fully recorded & applied'}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-      </motion.div>
-
-    </motion.div>
+      <MarbleEditSheet
+        item={editing}
+        lang={lang}
+        t={t}
+        tr={tr}
+        suggestions={statusSuggestions}
+        onClose={() => setEditing(null)}
+        onSave={async (id, status, white, brown) => {
+          await onUpdateMarbleStatus(id, status, white, brown);
+          setEditing(null);
+        }}
+      />
+    </div>
   );
+}
+
+function ZoneBlock({ group, isAr, t, tr, editable, onEdit }) {
+  return (
+    <>
+      <tr className="group-row">
+        <td colSpan={editable ? 6 : 5}>
+          <div className="group-row-inner">
+            <span>{zoneLabel(group.zone, isAr)}</span>
+            <span className="muted">
+              {isAr ? 'أبيض' : 'White'} <span className="num">{num(group.white)}</span> · {isAr ? 'جوزي' : 'Walnut'} <span className="num">{num(group.brown)}</span> · {isAr ? 'المجموع' : 'Total'} <span className="num">{num(group.white + group.brown)}</span>
+            </span>
+          </div>
+        </td>
+      </tr>
+      {group.items.map(item => {
+        const total = rowTotal(item);
+        const settled = isSettled(item.status);
+        return (
+          <tr key={item.id}>
+            <td className="c-title">{tr(item.task_name)}</td>
+            <td className="c-num" data-label={isAr ? 'أبيض' : 'White'}>{item.white_qty !== null ? num(item.white_qty) : '-'}</td>
+            <td className="c-num" data-label={isAr ? 'جوزي' : 'Walnut'}>{item.brown_qty !== null ? num(item.brown_qty) : '-'}</td>
+            <td className="c-num c-strong" data-label={isAr ? 'المجموع' : 'Total'}>{total !== null ? num(total) : '-'}</td>
+            <td className="c-full" data-label={t('colFieldStatus')}>
+              <span className={`status-line ${settled ? 'is-ok' : 'is-open'}`}>
+                {settled ? <CheckCircle2 size={15} aria-hidden="true" /> : <AlertCircle size={15} aria-hidden="true" />}
+                <span>{tr(item.status) || t('notSpecifiedYet')}</span>
+              </span>
+            </td>
+            {editable && (
+              <td className="c-actions">
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEdit(item)} aria-label={`${isAr ? 'تعديل' : 'Edit'} ${tr(item.task_name)}`}>
+                  <Pencil size={15} aria-hidden="true" />
+                  {isAr ? 'تعديل' : 'Edit'}
+                </button>
+              </td>
+            )}
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+function MarbleEditSheet({ item, lang, t, tr, suggestions, onClose, onSave }) {
+  const isAr = lang === 'ar';
+  const [white, setWhite] = useState('');
+  const [brown, setBrown] = useState('');
+  const [status, setStatus] = useState('');
+  const [openedFor, setOpenedFor] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  if (item && openedFor !== item.id) {
+    setOpenedFor(item.id);
+    setWhite(item.white_qty !== null ? String(item.white_qty) : '');
+    setBrown(item.brown_qty !== null ? String(item.brown_qty) : '');
+    setStatus(item.status || '');
+  }
+  if (!item) {
+    if (openedFor !== null) setOpenedFor(null);
+    return null;
+  }
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(item.id, status, white === '' ? null : parseInt(white, 10), brown === '' ? null : parseInt(brown, 10));
+    } catch {
+      // App shows the error; keep the sheet open.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const total = (parseInt(white, 10) || 0) + (parseInt(brown, 10) || 0);
+
+  return (
+    <Modal
+      open={Boolean(item)}
+      onClose={saving ? undefined : onClose}
+      title={tr(item.task_name)}
+      description={zoneLabel(item.zone, isAr)}
+      closeLabel={isAr ? 'إغلاق' : 'Close'}
+      footer={
+        <>
+          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={saving}>{isAr ? 'إلغاء' : 'Cancel'}</button>
+          <button type="submit" form="marble-form" className="btn btn--primary" aria-busy={saving}>
+            <Save size={18} aria-hidden="true" />
+            {isAr ? 'حفظ' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <form id="marble-form" className="stack-sm" onSubmit={submit}>
+        <div className="form-grid form-grid--tight">
+          <Field label={t('colWhiteQty')} htmlFor="mr-white" hint={isAr ? 'اتركه فارغاً إن لم يُحدد' : 'Leave empty if not set'}>
+            <input id="mr-white" className="input input--num" type="number" inputMode="numeric" min="0" value={white} onChange={(e) => setWhite(e.target.value)} data-autofocus />
+          </Field>
+          <Field label={t('colBrownQty')} htmlFor="mr-brown">
+            <input id="mr-brown" className="input input--num" type="number" inputMode="numeric" min="0" value={brown} onChange={(e) => setBrown(e.target.value)} />
+          </Field>
+        </div>
+        <div className="alert">
+          <span className="fw-bold">{isAr ? 'المجموع' : 'Total'}:</span>
+          <span className="num fw-black">{num(total)}</span>
+          <span className="muted">{palletText(total, isAr)}</span>
+        </div>
+        <Field label={t('colFieldStatus')} htmlFor="mr-status">
+          <input id="mr-status" className="input" list="marble-status-options" value={status} onChange={(e) => setStatus(e.target.value)} placeholder={t('enterFieldStatus')} />
+          <datalist id="marble-status-options">
+            {suggestions.map(s => <option key={s} value={s} />)}
+          </datalist>
+        </Field>
+      </form>
+    </Modal>
+  );
+}
+
+// ── PDF ───────────────────────────────────────────────────────────────────
+
+function buildMarbleReport({ zones, totals, lang, tr }) {
+  const isAr = lang === 'ar';
+  const rows = [];
+  zones.forEach(g => {
+    rows.push({ group: zoneLabel(g.zone, isAr), note: `${isAr ? 'أبيض' : 'White'} ${num(g.white)} · ${isAr ? 'جوزي' : 'Walnut'} ${num(g.brown)} · ${isAr ? 'المجموع' : 'Total'} ${num(g.white + g.brown)}` });
+    g.items.forEach(item => {
+      const total = rowTotal(item);
+      rows.push([
+        { v: tr(item.task_name), strong: true },
+        { v: item.white_qty !== null ? num(item.white_qty) : '-', align: 'center' },
+        { v: item.brown_qty !== null ? num(item.brown_qty) : '-', align: 'center' },
+        { v: total !== null ? num(total) : '-', align: 'center', strong: true },
+        { v: tr(item.status) || '-', tone: isSettled(item.status) ? 'success' : undefined },
+      ]);
+    });
+  });
+
+  const body = [
+    h.kpis([
+      { label: isAr ? 'المرمر الأبيض' : 'White marble', value: `${num(totals.white)}`, sub: palletText(totals.white, isAr) },
+      { label: isAr ? 'المرمر الجوزي' : 'Walnut marble', value: `${num(totals.brown)}`, sub: palletText(totals.brown, isAr) },
+      { label: isAr ? 'المجموع الكلي' : 'Grand total', value: `${num(totals.all)}`, tone: 'success', sub: palletText(totals.all, isAr) },
+    ]),
+    h.section(isAr ? 'التوزيع حسب المنطقة وطبيعة العمل' : 'Distribution by zone and task', h.table({
+      columns: [
+        { label: isAr ? 'طبيعة العمل' : 'Task' },
+        { label: isAr ? 'أبيض (قطعة)' : 'White (pcs)', align: 'center', width: '26mm' },
+        { label: isAr ? 'جوزي (قطعة)' : 'Walnut (pcs)', align: 'center', width: '26mm' },
+        { label: isAr ? 'الإجمالي' : 'Total', align: 'center', width: '24mm' },
+        { label: isAr ? 'الموقف الميداني' : 'Field status', width: '50mm' },
+      ],
+      rows,
+      foot: [
+        { v: isAr ? 'الإجمالي التراكمي لكل المناطق' : 'Grand total, all zones', strong: true },
+        num(totals.white), num(totals.brown), num(totals.all), '',
+      ],
+    }), { index: 1 }),
+  ].map(String).join('');
+
+  return buildReport({
+    lang,
+    title: isAr ? 'تقرير توزيع قطع المرمر حسب المناطق والألوان' : 'Marble Distribution by Zone and Colour',
+    code: docCode('MRB'),
+    meta: [
+      { label: isAr ? 'المناطق' : 'Zones', value: String(zones.length) },
+      { label: isAr ? 'فقرات العمل' : 'Tasks', value: String(zones.reduce((s, g) => s + g.items.length, 0)) },
+      { label: isAr ? 'قطع في السكيبة' : 'Pieces per pallet', value: String(PALLET) },
+    ],
+    body,
+  });
 }

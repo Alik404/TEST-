@@ -5,16 +5,18 @@
  *
  * يحتوي هذا الملف على:
  *  - CONFIG_EXCEL: إعدادات شيتات Excel (الأعمدة، عرضها، ألوان الترويسات)
- *  - CONFIG_PDF:   إعدادات التقرير الورقي (بيانات المشروع، التذييل)
  *  - exportToExcel(): دالة تصدير Excel
- *  - exportToPDF():  دالة تصدير/طباعة PDF
+ *  - exportRowsToExcel(): تصدير أي قائمة سجلات إلى شيت واحد
+ *  (تقارير PDF تُبنى في utils/report.js)
  *
  * لإضافة عمود جديد: أضف مدخلاً في الـ columns الخاصة بالشيت المطلوب.
  * لتغيير لون الترويسة: عدّل headerStyle في الشيت المطلوب.
  * ============================================================
  */
 
-import * as XLSX from 'xlsx';
+import { toast } from './toast';
+// The Excel library is large; it is loaded only when an export is requested.
+const loadXLSX = () => import('xlsx');
 
 // ─────────────────────────────────────────────────────────────
 // ١. إعدادات تصدير Excel
@@ -103,33 +105,11 @@ export const CONFIG_EXCEL = {
 };
 
 // ─────────────────────────────────────────────────────────────
-// ٢. إعدادات تصدير PDF
-// ─────────────────────────────────────────────────────────────
-
-export const CONFIG_PDF = {
-  /** عنوان التقرير الرئيسي */
-  reportTitle: 'تقرير متابعة نسب الإنجاز التراكمية',
-
-  /** اسم المشروع */
-  projectName: 'متابعة موقع الجندي المجهول',
-
-  /** الجهة المصدِرة */
-  issuedBy: 'دائرة المهندس المقيم',
-
-  /** التوقيعات في ذيل التقرير المطبوع */
-  signatures: [
-    { title: 'المهندس المقيم',           subtitle: 'التوقيع والختم: .........................' },
-    { title: 'ممثل الجهة المستفيدة',    subtitle: 'التوقيع والختم: .........................' },
-    { title: 'مدير المشروع / الاستشاري', subtitle: 'التوقيع والختم: .........................' },
-  ],
-};
-
-// ─────────────────────────────────────────────────────────────
 // ٣. مساعدات داخلية
 // ─────────────────────────────────────────────────────────────
 
 /** بناء شيت واحد من إعداد CONFIG_EXCEL + مصفوفة البيانات */
-function buildSheet(config, rows) {
+function buildSheet(XLSX, config, rows) {
   // بناء مصفوفة البيانات كـ AOA (Array of Arrays)
   const header = config.columns.map((c) => c.label);
   const data = rows.map((row) => config.columns.map((c) => c.get(row)));
@@ -167,20 +147,21 @@ function buildFileName(prefix) {
  * exportToExcel
  * @param {{ tasks: Array, nazalat: Array, marble: Array }} data
  */
-export function exportToExcel({ tasks, nazalat, marble }) {
+export async function exportToExcel({ tasks, nazalat, marble }) {
   try {
+    const XLSX = await loadXLSX();
     const wb = XLSX.utils.book_new();
 
     // ── الشيت الأول ──
-    const wsSummary = buildSheet(CONFIG_EXCEL.summary, tasks);
+    const wsSummary = buildSheet(XLSX, CONFIG_EXCEL.summary, tasks);
     XLSX.utils.book_append_sheet(wb, wsSummary, CONFIG_EXCEL.summary.sheetName);
 
     // ── الشيت الثاني ──
-    const wsNazalat = buildSheet(CONFIG_EXCEL.nazalat, nazalat);
+    const wsNazalat = buildSheet(XLSX, CONFIG_EXCEL.nazalat, nazalat);
     XLSX.utils.book_append_sheet(wb, wsNazalat, CONFIG_EXCEL.nazalat.sheetName);
 
     // ── الشيت الثالث ──
-    const wsMarble = buildSheet(CONFIG_EXCEL.marble, marble);
+    const wsMarble = buildSheet(XLSX, CONFIG_EXCEL.marble, marble);
     XLSX.utils.book_append_sheet(wb, wsMarble, CONFIG_EXCEL.marble.sheetName);
 
     // حفظ الملف
@@ -190,23 +171,33 @@ export function exportToExcel({ tasks, nazalat, marble }) {
     });
   } catch (err) {
     console.error('[exportToExcel] فشل التصدير:', err);
-    alert('حدث خطأ أثناء تصدير ملف Excel. راجع الكونسول للتفاصيل.');
+    toast.error('تعذر تصدير ملف Excel.');
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// ٥. دالة التصدير الرئيسية — PDF (طباعة)
-// ─────────────────────────────────────────────────────────────
-
 /**
- * exportToPDF
- * يحضّر بيانات الترويسة في DOM ثم يطلق window.print()
+ * exportRowsToExcel
+ * Exports a flat list of objects (keys become the header row) to one sheet.
+ * @param {Array<Object>} rows
+ * @param {string} prefix     file name prefix
+ * @param {string} sheetName
  */
-export function exportToPDF() {
+export async function exportRowsToExcel(rows, prefix, sheetName = 'Sheet1') {
   try {
-    window.print();
+    const XLSX = await loadXLSX();
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const headers = rows.length ? Object.keys(rows[0]) : [];
+    ws['!cols'] = headers.map(hd => ({
+      wch: Math.min(40, Math.max(10, hd.length + 2, ...rows.map(r => String(r[hd] ?? '').length + 2))),
+    }));
+    ws['!views'] = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    XLSX.writeFile(wb, buildFileName(prefix), { bookType: 'xlsx', type: 'binary' });
+    return true;
   } catch (err) {
-    console.error('[exportToPDF] فشل الطباعة:', err);
-    alert('حدث خطأ أثناء فتح نافذة الطباعة.');
+    console.error('[exportRowsToExcel] export failed:', err);
+    toast.error('تعذر تصدير ملف Excel.');
+    return false;
   }
 }

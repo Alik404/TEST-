@@ -1,169 +1,179 @@
-import React from 'react';
-import { User, ShieldAlert, FileSpreadsheet, Printer, RefreshCw, Sun, Moon, Languages, Menu } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Sun, Moon, Languages, RefreshCw, FileSpreadsheet, Printer, LogOut, ChevronDown
+} from 'lucide-react';
+import companyLogo from '../assets/company-logo.webp';
+import { roleLabel, initials } from '../navigation';
 
-export default function Header({ 
-  activeTab, 
+/**
+ * Top bar: section title on the start side, quick actions and the account
+ * menu on the end side. On phones only refresh and the account menu stay
+ * visible; everything else lives inside the menu.
+ */
+export default function Header({
+  section,
   user,
-  onExcelExport,
-  onPdfPrint, 
-  onRefresh, 
-  t, 
-  lang, 
-  setLang, 
-  theme, 
+  t,
+  lang,
+  setLang,
+  theme,
   setTheme,
-  onMenuToggle
+  onRefresh,
+  refreshing,
+  onExcelExport,
+  onPrintPage,
+  onLogout,
 }) {
-  const getTitle = () => {
-    switch (activeTab) {
-      case 'executive-summary':
-        return t('headerExecutiveTitle');
-      case 'dashboard':
-        return t('headerDashboardTitle');
-      case 'tracking':
-        return t('headerTrackingTitle');
-      case 'marble':
-        return t('headerMarbleTitle');
-      case 'marblex':
-        return t('headerMarblexTitle');
-      case 'materials-consumption':
-        return t('headerMaterialsConsumptionTitle');
-      case 'workers-wages':
-        return t('headerWorkersWagesTitle');
-      case 'weekly-advance':
-        return t('headerWeeklyAdvanceTitle');
-      case 'daily-updates':
-        return t('headerDailyUpdatesTitle');
-      case 'users-management':
-        return t('headerUsersTitle');
-      default:
-        return t('headerDefaultTitle');
-    }
-  };
+  const isAr = lang === 'ar';
+  const title = section ? t(section.titleKey) : t('headerDefaultTitle');
+  const subtitle = section ? t(section.subtitleKey) : t('headerDefaultSubtitle');
+  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
+  const toggleLang = () => setLang(isAr ? 'en' : 'ar');
 
-  const getSubtitle = () => {
-    switch (activeTab) {
-      case 'executive-summary':
-        return t('headerExecutiveSubtitle');
-      case 'dashboard':
-        return t('headerDashboardSubtitle');
-      case 'tracking':
-        return t('headerTrackingSubtitle');
-      case 'marble':
-        return t('headerMarbleSubtitle');
-      case 'marblex':
-        return t('headerMarblexSubtitle');
-      case 'materials-consumption':
-        return t('headerMaterialsConsumptionSubtitle');
-      case 'workers-wages':
-        return t('headerWorkersWagesSubtitle');
-      case 'weekly-advance':
-        return t('headerWeeklyAdvanceSubtitle');
-      case 'daily-updates':
-        return t('headerDailyUpdatesSubtitle');
-      case 'users-management':
-        return t('headerUsersSubtitle');
-      default:
-        return t('headerDefaultSubtitle');
-    }
+  return (
+    <header className="topbar">
+      <span className="topbar-brand brand-mark" aria-hidden="true">
+        <img src={companyLogo} alt="" />
+      </span>
+
+      <div className="topbar-title">
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
+
+      <div className="topbar-actions">
+        <button
+          type="button"
+          className="btn btn--ghost btn--icon topbar-wide"
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? (isAr ? 'الوضع الفاتح' : 'Light mode') : (isAr ? 'الوضع الداكن' : 'Dark mode')}
+          title={theme === 'dark' ? (isAr ? 'الوضع الفاتح' : 'Light mode') : (isAr ? 'الوضع الداكن' : 'Dark mode')}
+        >
+          {theme === 'dark' ? <Sun size={19} aria-hidden="true" /> : <Moon size={19} aria-hidden="true" />}
+        </button>
+
+        <button type="button" className="btn btn--ghost topbar-wide" onClick={toggleLang} lang={isAr ? 'en' : 'ar'}>
+          <Languages size={18} aria-hidden="true" />
+          {isAr ? 'English' : 'العربية'}
+        </button>
+
+        <button
+          type="button"
+          className="btn btn--ghost btn--icon"
+          onClick={onRefresh}
+          aria-label={t('refresh')}
+          title={t('refresh')}
+          aria-busy={refreshing || undefined}
+        >
+          <RefreshCw size={19} aria-hidden="true" />
+        </button>
+
+        <AccountMenu
+          user={user}
+          lang={lang}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onToggleLang={toggleLang}
+          onExcelExport={onExcelExport}
+          onPrintPage={onPrintPage}
+          onLogout={onLogout}
+          t={t}
+        />
+      </div>
+    </header>
+  );
+}
+
+function AccountMenu({ user, lang, theme, onToggleTheme, onToggleLang, onExcelExport, onPrintPage, onLogout, t }) {
+  const isAr = lang === 'ar';
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef(null);
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const first = menuRef.current?.querySelector('[role="menuitem"]');
+    first?.focus();
+
+    const onPointer = (event) => {
+      if (!anchorRef.current?.contains(event.target)) setOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const items = [...(menuRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+      const index = items.indexOf(document.activeElement);
+      const next = event.key === 'ArrowDown' ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+      items[next]?.focus();
+      event.preventDefault();
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const run = (fn) => () => {
+    setOpen(false);
+    fn?.();
   };
 
   return (
-    <header className="header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-      <div className="header-title-section" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: '240px' }}>
-        <button 
-          className="mobile-menu-btn" 
-          onClick={onMenuToggle}
-          aria-label={lang === 'ar' ? 'فتح القائمة الجانبية' : 'Open Sidebar'}
-          style={{
-            background: 'var(--surface-warm)',
-            border: '1px solid var(--border)',
-            color: 'var(--fg)',
-            cursor: 'pointer',
-            padding: '0.5rem',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 'var(--radius-md)',
-            minWidth: '40px',
-            minHeight: '40px'
-          }}
-        >
-          <Menu size={22} />
-        </button>
-        <div>
-          <h1 className="header-title" style={{ fontSize: '1.35rem', fontWeight: '800', lineHeight: 1.3 }}>{getTitle()}</h1>
-          <p className="header-subtitle" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '2px' }}>{getSubtitle()}</p>
-        </div>
-      </div>
+    <div className="menu-anchor" ref={anchorRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="user-chip"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        aria-label={isAr ? `قائمة الحساب: ${user.name}` : `Account menu: ${user.name}`}
+      >
+        <span className="avatar" aria-hidden="true">{initials(user.name)}</span>
+        <span className="user-chip-text">
+          <span className="user-chip-name">{user.name}</span>
+          <span className="user-chip-role">{roleLabel(user.role, lang)}</span>
+        </span>
+        <ChevronDown size={16} className="muted" aria-hidden="true" />
+      </button>
 
-      <div className="header-actions" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-        {/* Theme Switcher */}
-        <button 
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} 
-          className="btn-pill"
-          title={lang === 'ar' ? 'تغيير المظهر' : 'Toggle Theme'}
-          aria-label={lang === 'ar' ? 'تغيير المظهر' : 'Toggle Theme'}
-        >
-          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-          <span className="btn-pill-label">
-            {theme === 'dark' 
-              ? (lang === 'ar' ? 'فاتح' : 'Light') 
-              : (lang === 'ar' ? 'داكن' : 'Dark')}
-          </span>
-        </button>
-
-        {/* Language Switcher */}
-        <button 
-          onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} 
-          className="btn-pill"
-          title={lang === 'ar' ? 'English' : 'العربية'}
-          aria-label={lang === 'ar' ? 'English' : 'العربية'}
-        >
-          <Languages size={17} />
-          <span className="btn-pill-label">{lang === 'ar' ? 'English' : 'العربية'}</span>
-        </button>
-
-        {/* Refresh button */}
-        <button 
-          onClick={onRefresh} 
-          className="btn-pill"
-          title={t('refresh')}
-          aria-label={t('refresh')}
-          style={{ padding: '0.6rem' }}
-        >
-          <RefreshCw size={17} />
-        </button>
-
-        {/* Smart Export Actions */}
-        <button onClick={onExcelExport} className="btn-pill" title={t('exportExcel')} aria-label={t('exportExcel')}>
-          <FileSpreadsheet size={17} />
-          <span className="btn-pill-label">{lang === 'ar' ? 'Excel' : 'Excel'}</span>
-        </button>
-
-        <button onClick={onPdfPrint} className="btn-pill" title={t('exportPdf')} aria-label={t('exportPdf')}>
-          <Printer size={17} />
-          <span className="btn-pill-label">{lang === 'ar' ? 'PDF' : 'PDF'}</span>
-        </button>
-
-        {/* User profile */}
-        <div className="user-profile">
-          <div className="avatar">
-            <User size={16} />
+      {open && (
+        <div className="menu" role="menu" ref={menuRef} aria-label={isAr ? 'قائمة الحساب' : 'Account menu'}>
+          <div className="menu-header">
+            <div className="fw-black text-sm truncate">{user.name}</div>
+            <div className="text-xs muted">{roleLabel(user.role, lang)}</div>
           </div>
-          <div className="user-info">
-            <span className="user-name">{user.name}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <span className={`user-role-badge ${user.role === 'super_admin' ? 'role-super-admin' : user.role === 'admin' ? 'role-admin' : 'role-viewer'}`}>
-                {user.role === 'super_admin'
-                  ? (lang === 'ar' ? 'المدير العام' : 'General Director')
-                  : user.role === 'admin'
-                    ? (lang === 'ar' ? 'مهندس الموقع' : 'Site Engineer')
-                    : (lang === 'ar' ? 'إدارة عليا' : 'Senior Management')}
-              </span>
-            </div>
-          </div>
+          <button type="button" role="menuitem" className="menu-item" onClick={run(onToggleTheme)}>
+            {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+            {theme === 'dark' ? (isAr ? 'الوضع الفاتح' : 'Light mode') : (isAr ? 'الوضع الداكن' : 'Dark mode')}
+          </button>
+          <button type="button" role="menuitem" className="menu-item" onClick={run(onToggleLang)}>
+            <Languages size={18} aria-hidden="true" />
+            <span lang={isAr ? 'en' : 'ar'}>{isAr ? 'English' : 'العربية'}</span>
+          </button>
+          <div className="menu-sep" role="separator" />
+          <button type="button" role="menuitem" className="menu-item" onClick={run(onExcelExport)}>
+            <FileSpreadsheet size={18} aria-hidden="true" />
+            {isAr ? 'تصدير بيانات المشروع (Excel)' : 'Export project data (Excel)'}
+          </button>
+          <button type="button" role="menuitem" className="menu-item" onClick={run(onPrintPage)}>
+            <Printer size={18} aria-hidden="true" />
+            {isAr ? 'طباعة الصفحة الحالية' : 'Print this page'}
+          </button>
+          <div className="menu-sep" role="separator" />
+          <button type="button" role="menuitem" className="menu-item menu-item--danger" onClick={run(onLogout)}>
+            <LogOut size={18} aria-hidden="true" />
+            {t('logout')}
+          </button>
         </div>
-      </div>
-    </header>
+      )}
+    </div>
   );
 }

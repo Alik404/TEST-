@@ -153,7 +153,7 @@ export const saveJsonFallback = (filename, data) => {
 export const syncFromCloudToLocal = async () => {
   if (!isSupabaseActive()) return;
   try {
-    console.log('🔄 Syncing local SQLite with Supabase Cloud...');
+    console.log('Syncing local SQLite with Supabase Cloud...');
 
     // 1. Sync Categories
     const catRes = await safeSupa(supabase.from('categories').select('*').order('id', { ascending: true }));
@@ -289,7 +289,7 @@ export const syncFromCloudToLocal = async () => {
       saveJsonFallback('weekly_advance.json', advRes.data);
     }
 
-    console.log('✅ Local SQLite hydration from Supabase Cloud completed successfully.');
+    console.log('Local SQLite hydration from Supabase Cloud completed successfully.');
   } catch (syncErr) {
     console.warn('Cloud to local sync warning:', syncErr?.message || syncErr);
   }
