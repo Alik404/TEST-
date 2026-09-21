@@ -4,6 +4,7 @@ import {
   Layers, Calendar, Clock, User, Save, Trash2, Edit2, Copy, Printer,
   Plus, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle, FileText, Sparkles
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 const INITIAL_FORM_STATE = {
   date: new Date().toISOString().split('T')[0],
@@ -195,7 +196,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/materials-consumption');
+      const res = await apiFetch('/api/materials-consumption');
       if (res.ok) {
         const data = await res.json();
         setReports(data.map(normalizeReport));
@@ -729,7 +730,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
         ? `/api/materials-consumption/${isEditingId}` 
         : '/api/materials-consumption';
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(submitData)
@@ -764,7 +765,7 @@ export default function MaterialsConsumption({ user, t, lang }) {
     const id = reportToDelete.id;
     setDeletingReportId(id);
     try {
-      const res = await fetch(`/api/materials-consumption/${id}`, {
+      const res = await apiFetch(`/api/materials-consumption/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) {

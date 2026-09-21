@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,25 +12,66 @@ const envPath = path.resolve(__dirname, '../.env');
 dotenv.config({ path: envPath, override: true });
 dotenv.config({ override: true });
 
-import { 
-  dbAll, dbGet, dbRun, 
-  sqliteAll, sqliteGet, sqliteRun, 
-  supabase, isSupabaseActive, 
-  getJsonFallback, saveJsonFallback 
+import {
+  dbAll, dbGet, dbRun,
+  sqliteAll, sqliteGet, sqliteRun,
+  supabase, isSupabaseActive,
+  getJsonFallback, saveJsonFallback
 } from './database.js';
+import {
+  hashPassword, verifyPassword, issueToken,
+  requireAuth, requireEditor, requireSuperAdmin,
+  parseUpload
+} from './auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// ── CORS: same-origin by default; extra origins via ALLOWED_ORIGINS ─────────
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+const isOriginAllowed = (req) => {
+  const origin = req.get('origin');
+  // No Origin header: same-origin navigation, curl, or a native client.
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // The app's own origin (frontend served by this server).
+  if (origin === `${req.protocol}://${req.get('host')}`) return true;
+  return process.env.NODE_ENV !== 'production';
+};
+
+app.set('trust proxy', 1); // Render terminates TLS at a proxy; keeps req.protocol accurate.
+
+app.use((req, res, next) => {
+  if (!isOriginAllowed(req)) {
+    return res.status(403).json({ error: 'Origin not allowed.' });
+  }
+  next();
+});
+
+app.use(cors({ origin: true, credentials: true }));
+
+// A 12mb attachment becomes ~16mb once base64-encoded; 20mb leaves room for JSON overhead.
+app.use(express.json({ limit: '20mb' }));
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/api/uploads', express.static(uploadsDir));
+// Attachments are written with an allowlisted extension only (see auth.js → parseUpload).
+// nosniff stops a browser from re-interpreting a stored file as an executable type.
+app.use('/api/uploads', express.static(uploadsDir, {
+  index: false,
+  dotfiles: 'deny',
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  }
+}));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -56,42 +98,86 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبة.' });
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
+
   try {
-    let user = null;
+    // Look the account up by email ONLY. The password is never part of the query;
+    // it is compared with a constant-time check against the stored hash.
+    let record = null;
+    let cloudAnswered = false;
+
     if (isSupabaseActive()) {
       try {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('users')
-          .select('id, email, name, role')
-          .eq('email', email.trim().toLowerCase())
-          .eq('password', password)
+          .select('id, email, name, role, password')
+          .eq('email', normalizedEmail)
           .maybeSingle();
-        user = data;
+        if (!error) {
+          cloudAnswered = true;
+          record = data;
+        }
       } catch (err) {
         console.warn('Supabase login query fallback:', err.message);
       }
     }
 
-    if (!user) {
-      user = await sqliteGet(
-        'SELECT id, email, name, role FROM users WHERE LOWER(email) = LOWER(?) AND password = ?',
-        [email.trim(), password]
+    // When the cloud answered, it is the source of truth: an email it does not
+    // know must NOT be retried against local SQLite, which may hold stale or
+    // default accounts. SQLite is consulted only when the cloud is unreachable.
+    if (!record && !cloudAnswered) {
+      record = await sqliteGet(
+        'SELECT id, email, name, role, password FROM users WHERE LOWER(email) = LOWER(?)',
+        [normalizedEmail]
       );
     }
 
-    if (user) {
-      res.json({ user });
-    } else {
-      res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+    if (!record) {
+      return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
     }
+
+    const { ok, needsUpgrade } = await verifyPassword(password, record.password);
+    if (!ok) {
+      return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+    }
+
+    // Transparently migrate a legacy plaintext password to a scrypt hash on
+    // first successful login, so existing accounts keep working.
+    if (needsUpgrade) {
+      try {
+        const hashed = await hashPassword(password);
+        await sqliteRun('UPDATE users SET password = ? WHERE id = ?', [hashed, record.id]);
+        if (isSupabaseActive()) {
+          await supabase.from('users').update({ password: hashed }).eq('id', record.id);
+        }
+        console.log(`Upgraded stored password to a hash for user ${record.id}.`);
+      } catch (upgradeErr) {
+        console.warn('Password hash upgrade failed:', upgradeErr.message);
+      }
+    }
+
+    const user = {
+      id: record.id,
+      email: record.email,
+      name: record.name,
+      role: record.role
+    };
+
+    res.json({ user, token: issueToken(user) });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'حدث خطأ في الخادم أثناء تسجيل الدخول.' });
   }
 });
 
+// Returns the caller's identity as the SERVER sees it. The client uses this to
+// rehydrate its session instead of trusting whatever sits in localStorage.
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
 // ── 2. Fetch Dashboard Data (KPIs + Progress Table) ─────────────────────────
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const categories = await dbAll('SELECT * FROM categories ORDER BY id ASC');
     const tasks = await dbAll(`
@@ -197,7 +283,7 @@ app.get('/api/dashboard', async (req, res) => {
 });
 
 // ── 3. Sub-Units (Nazalat Tracking) Endpoints ───────────────────────────────
-app.get('/api/nazalat', async (req, res) => {
+app.get('/api/nazalat', requireAuth, async (req, res) => {
   const { zone, status } = req.query;
 
   let query = 'SELECT * FROM sub_units';
@@ -228,9 +314,10 @@ app.get('/api/nazalat', async (req, res) => {
 });
 
 // Toggle status of a Nazala
-app.post('/api/nazalat/:id/toggle', async (req, res) => {
+app.post('/api/nazalat/:id/toggle', requireEditor, async (req, res) => {
   const { id } = req.params;
-  const { userName, userRole } = req.body;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
 
   try {
     const item = await dbGet('SELECT status, task_id, code, zone FROM sub_units WHERE id = ?', [id]);
@@ -273,11 +360,11 @@ app.post('/api/nazalat/:id/toggle', async (req, res) => {
 });
 
 // Update details of a Nazala
-app.post('/api/nazalat/:id/details', async (req, res) => {
+app.post('/api/nazalat/:id/details', requireEditor, async (req, res) => {
   const { id } = req.params;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
   const { 
-    userName, 
-    userRole,
     white_marked,
     white_extra,
     white_applied,
@@ -336,9 +423,11 @@ app.post('/api/nazalat/:id/details', async (req, res) => {
 });
 
 // ── 4. Task Progress & Notes Endpoints ──────────────────────────────────────
-app.post('/api/tasks/:id/progress', async (req, res) => {
+app.post('/api/tasks/:id/progress', requireEditor, async (req, res) => {
   const { id } = req.params;
-  const { completed_quantity, progress_percent, notes, userName, userRole } = req.body;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
+  const { completed_quantity, progress_percent, notes } = req.body;
 
   try {
     const task = await dbGet('SELECT * FROM tasks WHERE id = ?', [id]);
@@ -402,7 +491,7 @@ app.post('/api/tasks/:id/progress', async (req, res) => {
   }
 });
 
-app.post('/api/tasks/:id/notes', async (req, res) => {
+app.post('/api/tasks/:id/notes', requireEditor, async (req, res) => {
   const { id } = req.params;
   const { notes } = req.body;
 
@@ -423,7 +512,7 @@ app.post('/api/tasks/:id/notes', async (req, res) => {
 });
 
 // ── 5. Marble Distribution Endpoints ────────────────────────────────────────
-app.get('/api/marble', async (req, res) => {
+app.get('/api/marble', requireAuth, async (req, res) => {
   try {
     const rows = await dbAll('SELECT * FROM marble_distribution ORDER BY id ASC');
     res.json(rows);
@@ -433,9 +522,11 @@ app.get('/api/marble', async (req, res) => {
   }
 });
 
-app.post('/api/marble/:id/status', async (req, res) => {
+app.post('/api/marble/:id/status', requireEditor, async (req, res) => {
   const { id } = req.params;
-  const { status, white_qty, brown_qty, userName } = req.body;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
+  const { status, white_qty, brown_qty } = req.body;
 
   try {
     const whiteVal = white_qty === undefined || white_qty === null ? null : parseInt(white_qty, 10);
@@ -466,7 +557,7 @@ app.post('/api/marble/:id/status', async (req, res) => {
 });
 
 // ── 6. Daily Updates / Chat API Endpoints ───────────────────────────────────
-app.get('/api/daily-updates', async (req, res) => {
+app.get('/api/daily-updates', requireAuth, async (req, res) => {
   try {
     if (isSupabaseActive()) {
       try {
@@ -497,8 +588,14 @@ app.get('/api/daily-updates', async (req, res) => {
   }
 });
 
-app.post('/api/daily-updates', async (req, res) => {
-  const { user_id, sender_name, sender_role, message_text, media_data, media_name, reply_to_id } = req.body;
+app.post('/api/daily-updates', requireAuth, async (req, res) => {
+  const { message_text, media_data, reply_to_id } = req.body;
+
+  // Identity comes from the verified session, never from the request body,
+  // so a caller cannot post under someone else's name or role.
+  const user_id = req.user.id;
+  const sender_name = req.user.name;
+  const sender_role = req.user.role;
 
   if (!message_text && !media_data) {
     return res.status(400).json({ error: 'محتوى الرسالة أو المرفق مطلوب.' });
@@ -509,42 +606,18 @@ app.post('/api/daily-updates', async (req, res) => {
     let media_type = null;
 
     if (media_data) {
-      let buffer;
-      let extension = 'bin';
-
-      const parts = media_data.split(';base64,');
-      if (parts.length === 2) {
-        const mimeType = parts[0].replace('data:', '');
-        buffer = Buffer.from(parts[1], 'base64');
-        
-        if (mimeType.includes('image')) {
-          media_type = 'image';
-          extension = (mimeType.split('/')[1] || '').split(';')[0] || 'png';
-        } else if (mimeType.includes('video')) {
-          media_type = 'video';
-          extension = (mimeType.split('/')[1] || '').split(';')[0] || 'mp4';
-        } else if (mimeType.includes('audio')) {
-          media_type = 'audio';
-          extension = (mimeType.split('/')[1] || '').split(';')[0] || 'webm';
-        }
-      } else {
-        buffer = Buffer.from(media_data, 'base64');
-        if (media_name) {
-          const ext = media_name.split('.').pop().toLowerCase();
-          extension = ext;
-          if (['mp4', 'webm', 'mov', 'ogg'].includes(ext)) {
-            media_type = media_name.startsWith('voice_') ? 'audio' : 'video';
-          } else if (['mp3', 'wav', 'm4a', 'aac', 'opus', 'caf'].includes(ext)) {
-            media_type = 'audio';
-          } else {
-            media_type = 'image';
-          }
-        }
+      let upload;
+      try {
+        upload = parseUpload(media_data);
+      } catch (uploadErr) {
+        return res.status(400).json({ error: uploadErr.message });
       }
 
-      const filename = `upload_${Date.now()}_${Math.round(Math.random() * 1000)}.${extension}`;
-      const filePath = path.join(uploadsDir, filename);
-      fs.writeFileSync(filePath, buffer);
+      media_type = upload.kind;
+      // The extension comes from our MIME allowlist, and the basename is generated
+      // here — no client-supplied string reaches the filesystem path.
+      const filename = `upload_${Date.now()}_${crypto.randomUUID()}.${upload.extension}`;
+      fs.writeFileSync(path.join(uploadsDir, filename), upload.buffer);
       media_url = `/api/uploads/${filename}`;
     }
 
@@ -587,7 +660,7 @@ app.post('/api/daily-updates', async (req, res) => {
 });
 
 // ── 7. Materials Consumption API Endpoints ──────────────────────────────────
-app.get('/api/materials-consumption', async (req, res) => {
+app.get('/api/materials-consumption', requireAuth, async (req, res) => {
   try {
     if (isSupabaseActive()) {
       try {
@@ -627,7 +700,7 @@ app.get('/api/materials-consumption', async (req, res) => {
   }
 });
 
-app.post('/api/materials-consumption', async (req, res) => {
+app.post('/api/materials-consumption', requireEditor, async (req, res) => {
   const report = req.body;
   if (!report.date || !report.day || !report.prepared_by) {
     return res.status(400).json({ error: 'الحقول الأساسية للتاريخ والمعد مطلوبة.' });
@@ -689,7 +762,7 @@ app.post('/api/materials-consumption', async (req, res) => {
   }
 });
 
-app.put('/api/materials-consumption/:id', async (req, res) => {
+app.put('/api/materials-consumption/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   const report = req.body;
   const updatedAt = new Date().toISOString();
@@ -754,7 +827,7 @@ app.put('/api/materials-consumption/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/materials-consumption/:id', async (req, res) => {
+app.delete('/api/materials-consumption/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   try {
     await sqliteRun('DELETE FROM materials_consumption WHERE id = ?', [id]);
@@ -775,7 +848,7 @@ app.delete('/api/materials-consumption/:id', async (req, res) => {
 });
 
 // ── 8. Workers Wages API Endpoints ──────────────────────────────────────────
-app.get('/api/workers-wages', async (req, res) => {
+app.get('/api/workers-wages', requireAuth, async (req, res) => {
   try {
     if (isSupabaseActive()) {
       try {
@@ -800,7 +873,7 @@ app.get('/api/workers-wages', async (req, res) => {
   }
 });
 
-app.post('/api/workers-wages', async (req, res) => {
+app.post('/api/workers-wages', requireEditor, async (req, res) => {
   const record = req.body;
   if (!record.work_date || !record.work_item) {
     return res.status(400).json({ error: 'تاريخ العمل والفقرة مطلوبة.' });
@@ -871,7 +944,7 @@ app.post('/api/workers-wages', async (req, res) => {
   }
 });
 
-app.put('/api/workers-wages/:id', async (req, res) => {
+app.put('/api/workers-wages/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   const record = req.body;
   const shiftsCount = Number(record.shifts_count) || 1;
@@ -917,7 +990,7 @@ app.put('/api/workers-wages/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/workers-wages/:id', async (req, res) => {
+app.delete('/api/workers-wages/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   try {
     await sqliteRun('DELETE FROM workers_wages WHERE id = ?', [id]);
@@ -943,7 +1016,7 @@ app.delete('/api/workers-wages/:id', async (req, res) => {
 });
 
 // ── 9. Weekly Advance API Endpoints ─────────────────────────────────────────
-app.get('/api/weekly-advance', async (req, res) => {
+app.get('/api/weekly-advance', requireAuth, async (req, res) => {
   try {
     if (isSupabaseActive()) {
       try {
@@ -976,7 +1049,7 @@ app.get('/api/weekly-advance', async (req, res) => {
   }
 });
 
-app.get('/api/weekly-advance/:id', async (req, res) => {
+app.get('/api/weekly-advance/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   try {
     if (isSupabaseActive()) {
@@ -1004,7 +1077,7 @@ app.get('/api/weekly-advance/:id', async (req, res) => {
   }
 });
 
-app.post('/api/weekly-advance', async (req, res) => {
+app.post('/api/weekly-advance', requireEditor, async (req, res) => {
   const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
   const id = Date.now().toString();
   const createdAt = new Date().toISOString();
@@ -1049,7 +1122,7 @@ app.post('/api/weekly-advance', async (req, res) => {
   }
 });
 
-app.put('/api/weekly-advance/:id', async (req, res) => {
+app.put('/api/weekly-advance/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   const { receipt_date, team_leader, site_name, team_number, data: formData } = req.body;
   const updatedAt = new Date().toISOString();
@@ -1088,7 +1161,7 @@ app.put('/api/weekly-advance/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/weekly-advance/:id', async (req, res) => {
+app.delete('/api/weekly-advance/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   try {
     await sqliteRun('DELETE FROM weekly_advance WHERE id = ?', [id]);
@@ -1109,7 +1182,7 @@ app.delete('/api/weekly-advance/:id', async (req, res) => {
 });
 
 // ── 9.5 Marblex Work Progress API Endpoints ────────────────────────────────
-app.get('/api/marblex', async (req, res) => {
+app.get('/api/marblex', requireAuth, async (req, res) => {
   const { zone, status } = req.query;
   try {
     let query = 'SELECT * FROM marblex_progress';
@@ -1138,11 +1211,13 @@ app.get('/api/marblex', async (req, res) => {
   }
 });
 
-app.post('/api/marblex', async (req, res) => {
+app.post('/api/marblex', requireEditor, async (req, res) => {
   const { 
     zone, item_name, total_pieces, applied_pieces, 
-    total_steel, applied_steel, notes, userName 
+    total_steel, applied_steel, notes 
   } = req.body;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
 
   if (!zone || !item_name) {
     return res.status(400).json({ error: 'الزون واسم المقطع مطلوبان.' });
@@ -1216,12 +1291,14 @@ app.post('/api/marblex', async (req, res) => {
   }
 });
 
-app.put('/api/marblex/:id', async (req, res) => {
+app.put('/api/marblex/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   const { 
     zone, item_name, total_pieces, applied_pieces, 
-    total_steel, applied_steel, status: manualStatus, notes, userName 
+    total_steel, applied_steel, status: manualStatus, notes 
   } = req.body;
+  // Audit-trail identity is taken from the verified session, not the request body.
+  const userName = req.user.name;
 
   try {
     const existing = await dbGet('SELECT * FROM marblex_progress WHERE id = ?', [id]);
@@ -1320,7 +1397,7 @@ app.put('/api/marblex/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/marblex/:id', async (req, res) => {
+app.delete('/api/marblex/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   try {
     await sqliteRun('DELETE FROM marblex_progress WHERE id = ?', [id]);
@@ -1343,13 +1420,14 @@ app.delete('/api/marblex/:id', async (req, res) => {
 });
 
 // ── 10. Users Management API Endpoints ──────────────────────────────────────
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', requireSuperAdmin, async (req, res) => {
   try {
     if (isSupabaseActive()) {
       try {
+        // The password column is never selected — a hash must not leave the server.
         const { data, error } = await supabase
           .from('users')
-          .select('id, email, name, role, password')
+          .select('id, email, name, role')
           .order('id', { ascending: true });
         if (!error && Array.isArray(data)) {
           return res.json(data);
@@ -1359,7 +1437,7 @@ app.get('/api/users', async (req, res) => {
       }
     }
 
-    const rows = await sqliteAll('SELECT id, email, name, role, password, created_at FROM users ORDER BY id ASC');
+    const rows = await sqliteAll('SELECT id, email, name, role, created_at FROM users ORDER BY id ASC');
     res.json(rows);
   } catch (err) {
     console.error('Fetch users error:', err);
@@ -1367,7 +1445,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', requireSuperAdmin, async (req, res) => {
   const { email, password, name, role } = req.body;
   if (!email || !password || !name || !role) {
     return res.status(400).json({ error: 'جميع الحقول مطلوبة.' });
@@ -1379,22 +1457,22 @@ app.post('/api/users', async (req, res) => {
       return res.status(400).json({ error: 'البريد الإلكتروني مستخدم بالفعل.' });
     }
 
+    const hashed = await hashPassword(password);
     const result = await sqliteRun(
       'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-      [email.trim().toLowerCase(), password, name.trim(), role]
+      [email.trim().toLowerCase(), hashed, name.trim(), role]
     );
 
     const newUser = {
       id: result.id,
       email: email.trim().toLowerCase(),
       name: name.trim(),
-      role,
-      password
+      role
     };
 
     if (isSupabaseActive()) {
       try {
-        await supabase.from('users').insert([newUser]);
+        await supabase.from('users').insert([{ ...newUser, password: hashed }]);
       } catch (e) {
         console.warn('Supabase user insert skipped:', e.message);
       }
@@ -1407,7 +1485,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
   const { email, password, name, role } = req.body;
   if (!email || !name || !role) {
@@ -1415,10 +1493,12 @@ app.put('/api/users/:id', async (req, res) => {
   }
 
   try {
-    if (password) {
+    const hashed = password ? await hashPassword(password) : null;
+
+    if (hashed) {
       await sqliteRun(
         'UPDATE users SET email = ?, password = ?, name = ?, role = ? WHERE id = ?',
-        [email.trim().toLowerCase(), password, name.trim(), role, id]
+        [email.trim().toLowerCase(), hashed, name.trim(), role, id]
       );
     } else {
       await sqliteRun(
@@ -1430,9 +1510,11 @@ app.put('/api/users/:id', async (req, res) => {
     if (isSupabaseActive()) {
       try {
         const updateObj = { email: email.trim().toLowerCase(), name: name.trim(), role };
-        if (password) updateObj.password = password;
+        if (hashed) updateObj.password = hashed;
         await supabase.from('users').update(updateObj).eq('id', id);
-      } catch {}
+      } catch (e) {
+        console.warn('Supabase user update skipped:', e.message);
+      }
     }
 
     res.json({ id, email: email.trim().toLowerCase(), name: name.trim(), role });
@@ -1442,9 +1524,22 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
   try {
+    // Guard against locking every administrator out of the system.
+    const target = await sqliteGet('SELECT role FROM users WHERE id = ?', [id]);
+    if (target?.role === 'super_admin') {
+      const remaining = await sqliteGet(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'super_admin'"
+      );
+      if ((remaining?.count || 0) <= 1) {
+        return res.status(400).json({
+          error: 'لا يمكن حذف حساب المدير العام الوحيد. أنشئ مديراً عاماً آخر أولاً.'
+        });
+      }
+    }
+
     await sqliteRun('DELETE FROM users WHERE id = ?', [id]);
 
     if (isSupabaseActive()) {

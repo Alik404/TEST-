@@ -13,6 +13,7 @@ import {
   FileCheck2,
   AlertTriangle
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 export default function ExecutiveSummary({ lang = 'ar', t = (k) => k }) {
   const [loading, setLoading] = useState(true);
@@ -26,9 +27,9 @@ export default function ExecutiveSummary({ lang = 'ar', t = (k) => k }) {
       setLoading(true);
       try {
         const [matRes, advRes, wagRes] = await Promise.all([
-          fetch('/api/materials-consumption').catch(() => null),
-          fetch('/api/weekly-advance').catch(() => null),
-          fetch('/api/workers-wages').catch(() => null)
+          apiFetch('/api/materials-consumption').catch(() => null),
+          apiFetch('/api/weekly-advance').catch(() => null),
+          apiFetch('/api/workers-wages').catch(() => null)
         ]);
 
         if (matRes && matRes.ok) {

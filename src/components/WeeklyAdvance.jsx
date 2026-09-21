@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, FileText, Printer, Eye, Pencil, Trash2, Search, Calendar, ChevronRight } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 const EMPTY_FORM = {
   // Right Column fields
@@ -92,7 +93,7 @@ export default function WeeklyAdvance({ user }) {
 
   const fetch_ = async () => {
     setLoading(true);
-    try { const r = await fetch('/api/weekly-advance'); if (r.ok) setRecords(await r.json()); }
+    try { const r = await apiFetch('/api/weekly-advance'); if (r.ok) setRecords(await r.json()); }
     catch (e) { console.error(e); } finally { setLoading(false); }
   };
   useEffect(() => { fetch_(); }, []);
@@ -133,14 +134,14 @@ export default function WeeklyAdvance({ user }) {
     setSaving(true);
     try {
       const payload = { receipt_date: form.receipt_date, team_leader: form.tech_name || '', site_name: form.site_name || '', team_number: form.work_type || '', data: JSON.stringify(form) };
-      const res = await fetch(editingId?`/api/weekly-advance/${editingId}`:'/api/weekly-advance', { method: editingId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const res = await apiFetch(editingId?`/api/weekly-advance/${editingId}`:'/api/weekly-advance', { method: editingId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('فشل الحفظ');
       await fetch_(); setViewMode('list');
     } catch (e) { alert(e.message); } finally { setSaving(false); }
   };
 
   const handleDelete = async id => {
-    try { await fetch(`/api/weekly-advance/${id}`,{method:'DELETE'}); await fetch_(); setDeleteConfirm(null); }
+    try { await apiFetch(`/api/weekly-advance/${id}`,{method:'DELETE'}); await fetch_(); setDeleteConfirm(null); }
     catch { alert('فشل الحذف'); }
   };
 

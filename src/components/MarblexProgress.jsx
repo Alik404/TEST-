@@ -5,6 +5,7 @@ import {
   Clock, AlertCircle, X, Save, RefreshCw, BarChart2, ShieldAlert, Copy,
   Award, TrendingUp, LayoutGrid, Table
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 export default function MarblexProgress({ user, lang, t }) {
   const isAr = lang === 'ar';
@@ -60,7 +61,7 @@ export default function MarblexProgress({ user, lang, t }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/marblex');
+      const res = await apiFetch('/api/marblex');
       if (!res.ok) throw new Error(isAr ? 'فشل جلب بيانات الماربلكس.' : 'Failed to fetch marblex data.');
       const data = await res.json();
       setItems(data);
@@ -207,7 +208,7 @@ export default function MarblexProgress({ user, lang, t }) {
 
       if (editingItem) {
         // PUT
-        const res = await fetch(`/api/marblex/${editingItem.id}`, {
+        const res = await apiFetch(`/api/marblex/${editingItem.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -217,7 +218,7 @@ export default function MarblexProgress({ user, lang, t }) {
         setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
       } else {
         // POST
-        const res = await fetch('/api/marblex', {
+        const res = await apiFetch('/api/marblex', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -241,7 +242,7 @@ export default function MarblexProgress({ user, lang, t }) {
     const { id } = itemToDelete;
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/marblex/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/marblex/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(isAr ? 'فشل حذف السجل.' : 'Failed to delete record.');
       setItems(prev => prev.filter(i => i.id !== id));
       setItemToDelete(null);

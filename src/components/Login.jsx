@@ -29,8 +29,8 @@ export default function Login({ onLoginSuccess, t, lang, setLang, theme, setThem
       });
       const data = await res.json();
 
-      if (res.ok) {
-        onLoginSuccess(data.user);
+      if (res.ok && data.token) {
+        onLoginSuccess(data.user, data.token);
       } else {
         setError(
           isAr

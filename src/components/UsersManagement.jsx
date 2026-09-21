@@ -4,6 +4,7 @@ import {
   Users, Plus, Trash2, Edit2, Shield, Mail, Lock, User, 
   Save, X, CheckCircle2, AlertCircle, Eye, EyeOff, ShieldCheck
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 export default function UsersManagement({ currentUser, t, lang }) {
   const [users, setUsers] = useState([]);
@@ -28,7 +29,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/users');
+      const res = await apiFetch('/api/users');
       if (res.ok) {
         const data = await res.json();
         setUsers(data);
@@ -67,7 +68,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
     resetForm();
     setUserId(user.id);
     setEmail(user.email);
-    setPassword(user.password || '');
+    setPassword('');
     setName(user.name);
     setRole(user.role);
     setFormMode('edit');
@@ -78,19 +79,21 @@ export default function UsersManagement({ currentUser, t, lang }) {
     setError('');
     setSuccess('');
 
-    if (!email || !password || !name || !role) {
+    const passwordRequired = formMode !== 'edit';
+    if (!email || !name || !role || (passwordRequired && !password)) {
       setError(lang === 'ar' ? 'يرجى ملء جميع الحقول المطلوبة.' : 'Please fill all required fields.');
       return;
     }
 
-    const payload = { email, password, name, role };
+    const payload = { email, name, role };
+    if (password) payload.password = password;
     setLoading(true);
 
     try {
       const method = formMode === 'edit' ? 'PUT' : 'POST';
       const url = formMode === 'edit' ? `/api/users/${userId}` : '/api/users';
       
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -125,7 +128,7 @@ export default function UsersManagement({ currentUser, t, lang }) {
     const { id } = userToDelete;
     setDeletingUserId(id);
     try {
-      const res = await fetch(`/api/users/${id}`, {
+      const res = await apiFetch(`/api/users/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -305,7 +308,6 @@ export default function UsersManagement({ currentUser, t, lang }) {
                       <th>{lang === 'ar' ? 'الاسم الكامل' : 'Full Name'}</th>
                       <th>{lang === 'ar' ? 'البريد الإلكتروني' : 'Email Address'}</th>
                       <th>{lang === 'ar' ? 'نوع الحساب / الصلاحية' : 'Account Type / Role'}</th>
-                      <th>{lang === 'ar' ? 'كلمة المرور' : 'Password'}</th>
                       <th style={{ textAlign: 'center' }}>{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
                     </tr>
                   </thead>
@@ -315,7 +317,6 @@ export default function UsersManagement({ currentUser, t, lang }) {
                         <td><div className="skeleton-hint" style={{ width: '120px', height: '16px', borderRadius: '4px' }}></div></td>
                         <td><div className="skeleton-hint" style={{ width: '180px', height: '16px', borderRadius: '4px' }}></div></td>
                         <td><div className="skeleton-hint" style={{ width: '90px', height: '22px', borderRadius: '12px' }}></div></td>
-                        <td><div className="skeleton-hint" style={{ width: '80px', height: '16px', borderRadius: '4px' }}></div></td>
                         <td>
                           <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
                             <div className="skeleton-hint" style={{ width: '32px', height: '28px', borderRadius: '8px' }}></div>
@@ -335,7 +336,6 @@ export default function UsersManagement({ currentUser, t, lang }) {
                       <th>{lang === 'ar' ? 'الاسم الكامل' : 'Full Name'}</th>
                       <th>{lang === 'ar' ? 'البريد الإلكتروني' : 'Email Address'}</th>
                       <th>{lang === 'ar' ? 'نوع الحساب / الصلاحية' : 'Account Type / Role'}</th>
-                      <th>{lang === 'ar' ? 'كلمة المرور' : 'Password'}</th>
                       <th style={{ textAlign: 'center' }}>{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
                     </tr>
                   </thead>
@@ -347,11 +347,6 @@ export default function UsersManagement({ currentUser, t, lang }) {
                         <td>
                           <span className={`user-role-badge ${getRoleClass(u.role)}`}>
                             {getRoleName(u.role)}
-                          </span>
-                        </td>
-                        <td style={{ fontFamily: 'var(--font-english)', fontSize: '0.85rem' }}>
-                          <span style={{ filter: 'blur(3px)', transition: 'filter 0.2s' }} onMouseEnter={(e) => e.target.style.filter = 'none'} onMouseLeave={(e) => e.target.style.filter = 'blur(3px)'} title={lang === 'ar' ? 'حرك الماوس للمعاينة' : 'Hover to view'}>
-                            {u.password || '••••••••'}
                           </span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -467,13 +462,16 @@ export default function UsersManagement({ currentUser, t, lang }) {
                     className="form-input"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder={formMode === 'edit'
+                      ? (lang === 'ar' ? 'اتركه فارغاً للإبقاء على كلمة المرور الحالية' : 'Leave blank to keep the current password')
+                      : '••••••••'}
                     style={{ 
                       paddingRight: lang === 'ar' ? '2.5rem' : '2.5rem',
                       paddingLeft: lang === 'ar' ? '2.5rem' : '2.5rem',
                       fontFamily: 'var(--font-english)'
                     }}
-                    required
+                    required={formMode !== 'edit'}
+                    autoComplete="new-password"
                   />
                   <button
                     type="button"

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Calendar
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 const SPRING_TRANSITION = { type: 'spring', stiffness: 100, damping: 20 };
 
@@ -57,7 +58,7 @@ export default function DashboardBento({ kpis, tasks, lang }) {
   useEffect(() => {
     const fetchLatestConsumption = async () => {
       try {
-        const res = await fetch('/api/materials-consumption');
+        const res = await apiFetch('/api/materials-consumption');
         if (res.ok) {
           const data = await res.json();
           if (data && data.length > 0) {

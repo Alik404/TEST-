@@ -15,6 +15,7 @@ import {
   Maximize2,
   Mic
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 export default function DailyUpdates({ user, t, lang }) {
   const [messages, setMessages] = useState([]);
@@ -54,7 +55,7 @@ export default function DailyUpdates({ user, t, lang }) {
     if (showIndicator) setRefreshing(true);
     if (messages.length === 0) setLoading(true);
     try {
-      const res = await fetch('/api/daily-updates');
+      const res = await apiFetch('/api/daily-updates');
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -87,6 +88,19 @@ export default function DailyUpdates({ user, t, lang }) {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // Matches MAX_UPLOAD_BYTES on the server. Checking here avoids uploading a
+    // large file only to have it rejected.
+    const MAX_UPLOAD_MB = 12;
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      alert(
+        lang === 'ar'
+          ? `حجم الملف أكبر من ${MAX_UPLOAD_MB} ميغابايت. اختر ملفاً أصغر أو صوّر مقطعاً أقصر.`
+          : `File is larger than ${MAX_UPLOAD_MB} MB. Choose a smaller file or record a shorter clip.`
+      );
+      e.target.value = null;
+      return;
+    }
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -230,20 +244,17 @@ export default function DailyUpdates({ user, t, lang }) {
 
     setLoading(true);
     try {
+      // Sender identity is taken from the session on the server.
       const body = {
-        user_id: user.id,
-        sender_name: user.name,
-        sender_role: user.role,
         message_text: inputText,
         reply_to_id: replyTo ? replyTo.id : null,
       };
 
       if (attachment) {
         body.media_data = attachment.data;
-        body.media_name = attachment.name;
       }
 
-      const res = await fetch('/api/daily-updates', {
+      const res = await apiFetch('/api/daily-updates', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

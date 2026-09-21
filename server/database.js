@@ -4,6 +4,7 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { hashPassword } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,16 +17,28 @@ dotenv.config({ override: true });
 const dbPath = path.join(__dirname, 'project.db');
 const sqliteDb = new sqlite3.Database(dbPath);
 
-// Hard safeguard: Never allow the old decommissioned project URL (xzlsrqtptuspoqovbgpg)
+// Credentials come from the environment only — never hardcoded in source.
+// See .env.example. If they are absent the server runs on local SQLite alone.
+const DECOMMISSIONED_PROJECT_REF = 'xzlsrqtptuspoqovbgpg';
+
 let supabaseUrl = process.env.SUPABASE_URL;
 let supabaseKey = process.env.SUPABASE_KEY;
 
-if (!supabaseUrl || supabaseUrl.includes('xzlsrqtptuspoqovbgpg')) {
-  console.warn('Overriding outdated or missing Supabase URL with active cloud URL.');
-  supabaseUrl = 'https://dmplquohltuocdjajwzq.supabase.co';
+if (supabaseUrl && supabaseUrl.includes(DECOMMISSIONED_PROJECT_REF)) {
+  console.warn(
+    'SUPABASE_URL points at the decommissioned project. Ignoring it and staying on local SQLite. ' +
+      'Update SUPABASE_URL in the environment.'
+  );
+  supabaseUrl = null;
 }
-if (!supabaseKey || supabaseKey.includes('placeholder')) {
-  supabaseKey = 'sb_publishable_pcl28wueyhYMoIMcIUZJcg_kgO-TsED';
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn(
+    'SUPABASE_URL / SUPABASE_KEY are not set. Running on local SQLite only — ' +
+      'writes will NOT persist across a redeploy on an ephemeral filesystem.'
+  );
+  supabaseUrl = null;
+  supabaseKey = null;
 }
 
 let supabase = null;
@@ -454,22 +467,41 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Seed default users if empty
+    // Seed accounts only when the users table is empty.
+    // Production never receives well-known passwords: on an ephemeral disk this
+    // block runs on EVERY boot, so a fixed default would be a permanent backdoor.
     const userCount = await sqliteGet('SELECT COUNT(*) as count FROM users');
     if (!userCount || userCount.count === 0) {
-      await sqliteRun(
-        'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-        ['admin@project.com', 'admin123', 'المدير العام', 'super_admin']
-      );
-      await sqliteRun(
-        'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-        ['engineer@project.com', 'admin123', 'المهندس المقيم', 'admin']
-      );
-      await sqliteRun(
-        'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-        ['viewer@project.com', 'viewer123', 'الإدارة العليا / الجهة المستفيدة', 'viewer']
-      );
-      console.log('Default users initialized in SQLite.');
+      const isProduction = process.env.NODE_ENV === 'production';
+      const initialEmail = process.env.INITIAL_ADMIN_EMAIL;
+      const initialPassword = process.env.INITIAL_ADMIN_PASSWORD;
+
+      if (initialEmail && initialPassword) {
+        await sqliteRun(
+          'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
+          [initialEmail.trim().toLowerCase(), await hashPassword(initialPassword), 'المدير العام', 'super_admin']
+        );
+        console.log('Initial super_admin created from INITIAL_ADMIN_EMAIL.');
+      } else if (!isProduction) {
+        await sqliteRun(
+          'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
+          ['admin@project.com', await hashPassword('admin123'), 'المدير العام', 'super_admin']
+        );
+        await sqliteRun(
+          'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
+          ['engineer@project.com', await hashPassword('admin123'), 'المهندس المقيم', 'admin']
+        );
+        await sqliteRun(
+          'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
+          ['viewer@project.com', await hashPassword('viewer123'), 'الإدارة العليا / الجهة المستفيدة', 'viewer']
+        );
+        console.log('Development accounts initialized in SQLite (hashed).');
+      } else {
+        console.warn(
+          'No local users and no INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD set. ' +
+            'Accounts will come from Supabase if it is configured; otherwise nobody can sign in.'
+        );
+      }
     }
 
     // Sync Materials Consumption if SQLite is empty

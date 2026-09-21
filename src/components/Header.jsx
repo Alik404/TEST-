@@ -3,9 +3,8 @@ import { User, ShieldAlert, FileSpreadsheet, Printer, RefreshCw, Sun, Moon, Lang
 
 export default function Header({ 
   activeTab, 
-  user, 
-  onRoleToggle, 
-  onExcelExport, 
+  user,
+  onExcelExport,
   onPdfPrint, 
   onRefresh, 
   t, 

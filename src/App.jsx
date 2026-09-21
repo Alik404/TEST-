@@ -11,6 +11,9 @@ import Login from './components/Login';
 import LandingPage from './components/LandingPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import companyLogo from './assets/company-logo.webp';
+import {
+  apiFetch, getToken, getStoredUser, setSession, clearSession, setUnauthorizedHandler
+} from './utils/api';
 
 // Lazy-Loaded Tab Modules for Optimal Performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -42,10 +45,9 @@ function TabSkeletonLoader({ t }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('project_user');
-    return saved ? JSON.parse(saved) : { id: 1, name: 'المهندس علي حاتم', role: 'admin', email: 'admin@company.com' };
-  });
+  // A stored user is only a display hint until /api/me confirms it. With no
+  // token there is no session — never fall back to a default account.
+  const [user, setUser] = useState(() => (getToken() ? getStoredUser() : null));
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -96,9 +98,9 @@ export default function App() {
     setError('');
     try {
       const [dashRes, nazalatRes, marbleRes] = await Promise.all([
-        fetch('/api/dashboard'),
-        fetch('/api/nazalat'),
-        fetch('/api/marble')
+        apiFetch('/api/dashboard'),
+        apiFetch('/api/nazalat'),
+        apiFetch('/api/marble')
       ]);
 
       if (!dashRes.ok) throw new Error('فشل جلب بيانات لوحة التحكم.');
@@ -125,39 +127,55 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [user]);
-
-  const handleLoginSuccess = (loggedInUser) => {
-    setUser(loggedInUser);
-    localStorage.setItem('project_user', JSON.stringify(loggedInUser));
-    showToast(lang === 'ar' ? `مرحباً بك، ${loggedInUser.name}` : `Welcome, ${loggedInUser.name}`);
-  };
-
   const handleLogout = () => {
+    clearSession();
     setUser(null);
-    localStorage.removeItem('project_user');
+    setShowLogin(true);
   };
 
-  // Developer role-toggle helper
-  const handleRoleToggle = () => {
+  // An expired or revoked token signs the user out in place instead of
+  // leaving an interface the server will refuse.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearSession();
+      setUser(null);
+      setShowLogin(true);
+    });
+  }, []);
+
+  // Confirm the stored session with the server once on load. The role shown in
+  // the UI is the one the server issued, not whatever sits in localStorage.
+  useEffect(() => {
+    if (!getToken()) return;
+    apiFetch('/api/me')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.user) {
+          setUser(prev => ({ ...prev, ...data.user }));
+        }
+      })
+      .catch(() => {
+        // Network failure: keep the cached user; the next API call re-checks.
+      });
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
-    const nextRole = user.role === 'admin' ? 'viewer' : 'admin';
-    const nextName = nextRole === 'admin' ? 'المهندس المقيم' : 'الإدارة العليا';
-    const updatedUser = { ...user, role: nextRole, name: nextName };
-    setUser(updatedUser);
-    localStorage.setItem('project_user', JSON.stringify(updatedUser));
-    showToast(lang === 'ar' ? `تم التبديل إلى: ${nextName}` : `Switched role to: ${nextRole}`);
+    fetchData();
+  }, [user?.id]);
+
+  const handleLoginSuccess = (loggedInUser, token) => {
+    setSession(loggedInUser, token);
+    setUser(loggedInUser);
+    showToast(lang === 'ar' ? `مرحباً بك، ${loggedInUser.name}` : `Welcome, ${loggedInUser.name}`);
   };
 
   // Toggle Nazala Status (Admin only)
   const handleToggleNazala = async (id) => {
     try {
-      const response = await fetch(`/api/nazalat/${id}/toggle`, {
+      const response = await apiFetch(`/api/nazalat/${id}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userName: user.name, userRole: user.role })
       });
       if (!response.ok) throw new Error('فشل تحديث حالة النزلة.');
       
@@ -174,7 +192,7 @@ export default function App() {
       }));
 
       // Update background dashboard data
-      const dashRes = await fetch('/api/dashboard');
+      const dashRes = await apiFetch('/api/dashboard');
       if (dashRes.ok) {
         const dashData = await dashRes.json();
         setKpis(dashData.kpis);
@@ -189,16 +207,16 @@ export default function App() {
   // Update Nazala Details (Admin only)
   const handleUpdateNazalaDetails = async (id, details) => {
     try {
-      const response = await fetch(`/api/nazalat/${id}/details`, {
+      const response = await apiFetch(`/api/nazalat/${id}/details`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...details, userName: user.name, userRole: user.role })
+        body: JSON.stringify(details)
       });
       if (!response.ok) throw new Error('فشل تحديث تفاصيل النزلة.');
       
       setNazalat(prev => prev.map(n => n.id === id ? { ...n, ...details } : n));
       
-      const dashRes = await fetch('/api/dashboard');
+      const dashRes = await apiFetch('/api/dashboard');
       if (dashRes.ok) {
         const dashData = await dashRes.json();
         setKpis(dashData.kpis);
@@ -213,15 +231,13 @@ export default function App() {
   // Update Manual Task Progress (Admin only)
   const handleUpdateProgress = async (taskId, progressPercent, notes, completedQuantity) => {
     try {
-      const response = await fetch(`/api/tasks/${taskId}/progress`, {
+      const response = await apiFetch(`/api/tasks/${taskId}/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           progress_percent: progressPercent, 
           notes,
-          completed_quantity: completedQuantity,
-          userName: user?.name || 'المهندس المقيم',
-          userRole: user?.role || 'admin'
+          completed_quantity: completedQuantity
         }),
       });
 
@@ -245,15 +261,13 @@ export default function App() {
   // Update Marble Zone Field Status & Quantities (Admin only)
   const handleUpdateMarbleStatus = async (id, status, white_qty, brown_qty) => {
     try {
-      const response = await fetch(`/api/marble/${id}/status`, {
+      const response = await apiFetch(`/api/marble/${id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           status,
           white_qty,
-          brown_qty,
-          userName: user.name,
-          userRole: user.role
+          brown_qty
         }),
       });
 
@@ -261,7 +275,7 @@ export default function App() {
       
       setMarble(prev => prev.map(item => item.id === id ? { ...item, status, white_qty, brown_qty } : item));
       
-      const dashRes = await fetch('/api/dashboard');
+      const dashRes = await apiFetch('/api/dashboard');
       if (dashRes.ok) {
         const dashData = await dashRes.json();
         setKpis(dashData.kpis);
@@ -424,7 +438,6 @@ export default function App() {
         <Header 
           activeTab={activeTab} 
           user={user} 
-          onRoleToggle={handleRoleToggle}
           onExcelExport={handleExcelExport}
           onPdfPrint={handlePdfPrint}
           onRefresh={fetchData}

@@ -1,4 +1,5 @@
 import { initDatabase, dbRun, dbGet } from './database.js';
+import { hashPassword } from './auth.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -21,18 +22,19 @@ const seedData = async () => {
     await dbRun('DELETE FROM marble_distribution');
 
     // 2. Seed Users
-    // passwords: admin123 / viewer123 (plain for simplicity of inspection)
+    // Development accounts. Passwords are stored as scrypt hashes, never plaintext.
+    // Change these immediately on any deployment reachable from the internet.
     await dbRun(
       'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-      ['admin@project.com', 'admin123', 'المدير العام', 'super_admin']
+      ['admin@project.com', await hashPassword('admin123'), 'المدير العام', 'super_admin']
     );
     await dbRun(
       'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-      ['engineer@project.com', 'admin123', 'المهندس المقيم', 'admin']
+      ['engineer@project.com', await hashPassword('admin123'), 'المهندس المقيم', 'admin']
     );
     await dbRun(
       'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, ?)',
-      ['viewer@project.com', 'viewer123', 'الإدارة العليا / الجهة المستفيدة', 'viewer']
+      ['viewer@project.com', await hashPassword('viewer123'), 'الإدارة العليا / الجهة المستفيدة', 'viewer']
     );
     console.log('Users seeded.');
 

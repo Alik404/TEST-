@@ -5,6 +5,7 @@ import {
   FileSpreadsheet, FileText, X, Check, Calculator, Clock, Users, DollarSign
 } from 'lucide-react';
 import { exportToExcel, exportToPDF } from '../utils/exportUtils';
+import { apiFetch } from '../utils/api';
 
 const QUICK_TAGS = [
   'تصنيف جوينات',
@@ -48,7 +49,7 @@ export default function WorkersWages({ user, t, lang }) {
   const fetchWages = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/workers-wages');
+      const res = await apiFetch('/api/workers-wages');
       if (res.ok) {
         const data = await res.json();
         setWages(data);
@@ -127,7 +128,7 @@ export default function WorkersWages({ user, t, lang }) {
       const url = editingRecord ? `/api/workers-wages/${editingRecord.id}` : '/api/workers-wages';
       const method = editingRecord ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -149,7 +150,7 @@ export default function WorkersWages({ user, t, lang }) {
     const { id } = itemToDelete;
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/workers-wages/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/workers-wages/${id}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchWages();
         setItemToDelete(null);
