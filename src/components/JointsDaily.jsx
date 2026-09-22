@@ -9,13 +9,13 @@ import { toast } from '../utils/toast';
 import { openReport } from '../utils/report';
 import { exportRowsToExcel } from '../utils/exportUtils';
 import {
-  JOINT_TYPES, QUICK_ITEMS, jointType, rowTotal, recordRows, rowsByType, dayTotals, cumulative, byDateAsc
+  JOINT_TYPES, QUICK_ITEMS, ZONES, jointType, zoneLabel, rowTotal, recordRows, rowsByType, dayTotals, cumulative, byDateAsc
 } from '../utils/joints';
 import { buildJointsDayReport, buildJointsRangeReport } from '../utils/jointsReport';
 import { canEdit } from '../navigation';
 import { StatCard, EmptyState, Modal, Field, ConfirmDialog, LoadingBlock, Segmented } from './ui';
 
-const newRow = (type = 'horizontal', item = QUICK_ITEMS[0]) => ({ type, item, count: '', length: String(jointType(type).length) });
+const newRow = (type = 'horizontal', item = QUICK_ITEMS[0], zone = ZONES[0]) => ({ type, item, count: '', length: String(jointType(type).length), zone });
 
 const emptyForm = () => ({
   report_date: isoDay(),
@@ -90,7 +90,7 @@ export default function JointsDaily({ user, lang }) {
       workers_count: record.workers_count ?? '',
       sealant_rate: record.data?.sealant_rate || '',
       notes: record.notes || '',
-      rows: rows.length ? rows.map(r => ({ type: jointType(r.type).id, item: r.item, count: String(r.count), length: String(r.length) })) : [newRow()],
+      rows: rows.length ? rows.map(r => ({ type: jointType(r.type).id, item: r.item, count: String(r.count), length: String(r.length), zone: r.zone || ZONES[0] })) : [newRow()],
     });
     setFormOpen(true);
   };
@@ -110,7 +110,7 @@ export default function JointsDaily({ user, lang }) {
 
   const addRow = () => setForm(f => {
     const last = f.rows[f.rows.length - 1];
-    return { ...f, rows: [...f.rows, newRow(last?.type || 'horizontal', last?.item || QUICK_ITEMS[0])] };
+    return { ...f, rows: [...f.rows, newRow(last?.type || 'horizontal', last?.item || QUICK_ITEMS[0], last?.zone || ZONES[0])] };
   });
 
   const removeRow = (i) => setForm(f => ({ ...f, rows: f.rows.filter((_, j) => j !== i) }));
@@ -133,7 +133,7 @@ export default function JointsDaily({ user, lang }) {
         notes: form.notes.trim(),
         data: {
           sealant_rate: form.sealant_rate.trim(),
-          rows: validRows.map(r => ({ type: r.type, item: r.item.trim(), count: Number(r.count), length: Number(r.length) })),
+          rows: validRows.map(r => ({ type: r.type, item: r.item.trim(), count: Number(r.count), length: Number(r.length), zone: r.zone || ZONES[0] })),
         },
       };
       const res = await apiFetch(editing ? `/api/joints-daily/${editing.id}` : '/api/joints-daily', {
@@ -181,6 +181,7 @@ export default function JointsDaily({ user, lang }) {
         rows.push({
           'التاريخ': rec.report_date,
           'النوع': jointType(r.type).label.ar,
+          'الزون': zoneLabel(r.zone, true),
           'الفقرة المنجزة': r.item,
           'عدد النزلات': Number(r.count) || 0,
           'أمتار الطول للنزلة الواحدة': Number(r.length) || 0,
@@ -376,7 +377,7 @@ export default function JointsDaily({ user, lang }) {
           const upto = cumulative(records, viewing.report_date);
           return (
             <div className="stack">
-              <JointsSheet groups={rowsByType(recordRows(viewing))} total={t.total} totalLabel={isAr ? 'المجموع الكلي' : 'Grand total'} isAr={isAr} />
+              <JointsSheet groups={rowsByType(recordRows(viewing))} total={t.total} totalLabel={isAr ? 'المجموع الكلي' : 'Grand total'} isAr={isAr} showZone />
               <div className="kv jd-kv">
                 <div className="kv-item"><div className="kv-label"><Users size={14} aria-hidden="true" /> {isAr ? 'عدد العمال' : 'Workers'}</div><div className="kv-value num">{Number(viewing.workers_count) ? num(viewing.workers_count) : '-'}</div></div>
                 <div className="kv-item"><div className="kv-label"><Layers size={14} aria-hidden="true" /> {isAr ? 'استهلاك الصوصج' : 'Sealant use'}</div><div className="kv-value num" dir="ltr">{viewing.data?.sealant_rate || '-'}</div></div>
@@ -446,7 +447,12 @@ export default function JointsDaily({ user, lang }) {
                         <button key={item} type="button" className="chip" aria-pressed={row.item === item} onClick={() => setRow(i, { item })}>{item}</button>
                       ))}
                     </div>
-                    <div className="form-grid">
+                    <div className="form-grid form-grid--3">
+                      <Field label={isAr ? 'زون العمل' : 'Work zone'} htmlFor={`jd-${i}-zone`}>
+                        <select id={`jd-${i}-zone`} className="select" value={row.zone} onChange={(e) => setRow(i, { zone: e.target.value })}>
+                          {ZONES.map(z => <option key={z} value={z}>{zoneLabel(z, isAr)}</option>)}
+                        </select>
+                      </Field>
                       <Field label={isAr ? 'عدد النزلات' : 'Downspouts'} htmlFor={`jd-${i}-count`} hint={isAr ? 'يقبل الكسور مثل 0.5' : 'Fractions allowed, e.g. 0.5'}>
                         <input id={`jd-${i}-count`} type="number" className="input input--num" inputMode="decimal" min="0" step="0.5" value={row.count} onChange={(e) => setRow(i, { count: e.target.value })} required />
                       </Field>
@@ -500,14 +506,16 @@ export default function JointsDaily({ user, lang }) {
 }
 
 /** On-screen version of the paper table: a band per type, then the grand total. */
-function JointsSheet({ groups, total, totalLabel, isAr }) {
+function JointsSheet({ groups, total, totalLabel, isAr, showZone = false }) {
   const unit = isAr ? 'م' : 'm';
+  const colCount = showZone ? 5 : 4;
   return (
     <div className="table-wrap">
       <table className="jt-sheet">
         <thead>
           <tr>
             <th scope="col">{isAr ? 'الفقرة المنجزة' : 'Item'}</th>
+            {showZone && <th scope="col">{isAr ? 'الزون' : 'Zone'}</th>}
             <th scope="col" className="c-num">{isAr ? 'النزلات' : 'Downspouts'}</th>
             <th scope="col" className="c-num">{isAr ? 'م / نزلة' : 'm each'}</th>
             <th scope="col" className="c-num">{isAr ? 'المجموع' : 'Total'}</th>
@@ -516,11 +524,12 @@ function JointsSheet({ groups, total, totalLabel, isAr }) {
         {groups.map(({ type, rows }) => (
           <tbody key={type.id}>
             <tr className="jt-band">
-              <th scope="colgroup" colSpan={4}>{type.label[isAr ? 'ar' : 'en']}</th>
+              <th scope="colgroup" colSpan={colCount}>{type.label[isAr ? 'ar' : 'en']}</th>
             </tr>
             {rows.map((r, i) => (
               <tr key={`${r.item}-${i}`}>
                 <td>{r.item}</td>
+                {showZone && <td><span className="badge badge--outline">{zoneLabel(r.zone, isAr)}</span></td>}
                 <td className="c-num"><span className="num">{num(r.count)}</span></td>
                 <td className="c-num"><span className="num">{num(r.length)}</span></td>
                 <td className="c-num"><strong className="num">{num(r.total ?? rowTotal(r))} {unit}</strong></td>
@@ -530,7 +539,7 @@ function JointsSheet({ groups, total, totalLabel, isAr }) {
         ))}
         <tfoot>
           <tr>
-            <th scope="row" colSpan={3}>{totalLabel}</th>
+            <th scope="row" colSpan={colCount - 1}>{totalLabel}</th>
             <td className="c-num"><strong className="num">{num(total)} {unit}</strong></td>
           </tr>
         </tfoot>

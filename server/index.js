@@ -1560,10 +1560,11 @@ app.use(express.static(clientDistPath));
 
 // ── 9.6 Daily Joints Progress (الجوينات اليومية) ────────────────────────────
 // One record per work day. `data` holds the rows of the paper sheet:
-//   rows: [{ type: 'horizontal'|'vertical', item, count, length }]
+//   rows: [{ type: 'horizontal'|'vertical', item, count, length, zone }]
 // plus sealant_rate. Totals are always derived (count x length), never stored.
 
 const JOINT_TYPES = new Set(['horizontal', 'vertical']);
+const JOINT_ZONES = new Set(['Zone A', 'Zone B', 'Zone C']);
 
 const parseJointsData = (raw) => {
   if (!raw) return {};
@@ -1577,6 +1578,7 @@ const sanitizeJointsBody = (body = {}) => {
   const cleanRows = rows
     .map(r => ({
       type: JOINT_TYPES.has(r?.type) ? r.type : 'horizontal',
+      zone: JOINT_ZONES.has(r?.zone) ? r.zone : 'Zone A',
       item: String(r?.item ?? '').trim().slice(0, 120),
       count: Math.max(0, Math.min(1000, Number(r?.count) || 0)),
       length: Math.max(0, Math.min(1000, Number(r?.length) || 0)),

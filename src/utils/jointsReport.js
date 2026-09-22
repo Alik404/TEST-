@@ -7,7 +7,7 @@
  */
 import { buildReport, h, esc, docCode } from './report';
 import { num, date as fmtDate } from './format';
-import { JOINT_TYPES, rowTotal, recordRows, rowsByType, dayTotals, cumulative, byDateAsc } from './joints';
+import { JOINT_TYPES, rowTotal, recordRows, rowsByType, dayTotals, cumulative, byDateAsc, zoneLabel } from './joints';
 
 const STYLE = `
   <style>
@@ -21,6 +21,7 @@ const STYLE = `
     .jt .jt-cols th { background: #ffffff; font-weight: 700; font-size: 8pt; }
     .jt td { font-variant-numeric: tabular-nums; }
     .jt td.jt-item { text-align: start; font-weight: 600; }
+    .jt .jt-zone { display: block; font-size: 7pt; font-weight: 500; color: #52525b; }
     .jt .jt-total td { background: #fde047; font-weight: 800; font-size: 9.5pt; }
     .jt-facts { display: flex; flex-wrap: wrap; gap: 2mm 8mm; margin-top: 2mm; font-size: 9pt; }
     .jt-facts strong { font-variant-numeric: tabular-nums; }
@@ -39,7 +40,7 @@ const paperDate = (iso) => {
 const meterUnit = (isAr) => (isAr ? 'متر' : 'm');
 
 /** One table in the paper layout: title, a band per type, grand total. */
-const jointsTable = ({ title, groups, total, totalLabel, isAr }) => {
+const jointsTable = ({ title, groups, total, totalLabel, isAr, showZone = false }) => {
   const cols = isAr
     ? ['الفقرة المنجزة', 'عدد النزلات', 'أمتار الطول للنزلة الواحدة', 'المجموع', 'الوحدة']
     : ['Completed item', 'Downspouts', 'Meters per downspout', 'Total', 'Unit'];
@@ -48,7 +49,7 @@ const jointsTable = ({ title, groups, total, totalLabel, isAr }) => {
     <tr class="jt-cols">${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>
     ${rows.map(r => `
       <tr>
-        <td class="jt-item">${esc(r.item)}</td>
+        <td class="jt-item">${esc(r.item)}${showZone ? `<span class="jt-zone">${esc(zoneLabel(r.zone, isAr))}</span>` : ''}</td>
         <td>${esc(num(r.count))}</td>
         <td>${esc(num(r.length))}</td>
         <td><strong>${esc(num(r.total ?? rowTotal(r)))}</strong></td>
@@ -80,6 +81,7 @@ const dayBlock = (record, isAr) => {
         total: totals.total,
         totalLabel: isAr ? 'المجموع الكلي' : 'Grand total',
         isAr,
+        showZone: true,
       })}
       ${facts.length ? `<div class="jt-facts">${facts.map(f => `<span>${f}</span>`).join('')}</div>` : ''}
       ${record.notes ? `<div class="jt-note">${esc(record.notes)}</div>` : ''}

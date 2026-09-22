@@ -3,7 +3,7 @@
  *
  * A record is one work day:
  *   { id, report_date: 'YYYY-MM-DD', workers_count, notes,
- *     data: { rows: [{ type, item, count, length }], sealant_rate } }
+ *     data: { rows: [{ type, item, count, length, zone }], sealant_rate } }
  * A row's total is always count x length (meters); it is never stored.
  */
 
@@ -13,6 +13,11 @@ export const JOINT_TYPES = [
 ];
 
 export const jointType = (id) => JOINT_TYPES.find(t => t.id === id) || JOINT_TYPES[0];
+
+/** Work zones, matching the A / B / C zones used across the rest of the site. */
+export const ZONES = ['Zone A', 'Zone B', 'Zone C'];
+
+export const zoneLabel = (zone, isAr) => (isAr ? String(zone || ZONES[0]).replace('Zone', 'زون') : (zone || ZONES[0]));
 
 /** Work items as written on the site's paper sheets. */
 export const QUICK_ITEMS = [
