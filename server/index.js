@@ -15,7 +15,7 @@ dotenv.config({ override: true });
 import {
   dbAll, dbGet, dbRun,
   sqliteAll, sqliteGet, sqliteRun,
-  supabase, isSupabaseActive,
+  supabase, isSupabaseActive, withTimeout,
   getJsonFallback, saveJsonFallback
 } from './database.js';
 import {
@@ -1595,6 +1595,18 @@ const sanitizeJointsBody = (body = {}) => {
   };
 };
 
+// When the cloud is active it is the source of truth: the server replaces its
+// local copy from it on every boot. A write the cloud rejected would therefore
+// vanish at the next restart, so it is reported to the user instead of hidden.
+const jointsCloudError = (error) => {
+  const msg = String(error?.message || error || '');
+  const missing = error?.code === '42P01' || error?.code === 'PGRST205' || /does not exist|could not find the table/i.test(msg);
+  console.error('Supabase joints_daily write failed:', msg);
+  return missing
+    ? 'جدول الجوينات غير موجود في قاعدة البيانات السحابية. شغّل الملف supabase_joints_daily.sql في Supabase ثم أعد المحاولة.'
+    : `تعذر الحفظ في قاعدة البيانات السحابية، لم يُحفظ شيء. السبب: ${msg}`;
+};
+
 const jointsTotal = (data) => (data.rows || []).reduce((s, r) => s + r.count * r.length, 0);
 
 const normalizeJointsRow = (r) => ({ ...r, id: String(r.id), data: parseJointsData(r.data) });
@@ -1639,20 +1651,16 @@ app.post('/api/joints-daily', requireEditor, async (req, res) => {
   };
 
   try {
+    if (isSupabaseActive()) {
+      const { error } = await withTimeout(supabase.from('joints_daily').insert([record]), 10000);
+      if (error) return res.status(502).json({ error: jointsCloudError(error) });
+    }
+
     await sqliteRun(
       'INSERT INTO joints_daily (id, report_date, workers_count, notes, data, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       [record.id, record.report_date, record.workers_count, record.notes, JSON.stringify(record.data), record.created_at]
     );
     await mirrorJointsToJson();
-
-    if (isSupabaseActive()) {
-      try {
-        const { error } = await supabase.from('joints_daily').insert([record]);
-        if (error) console.warn('Supabase joints_daily insert warning:', error.message);
-      } catch (e) {
-        console.warn('Supabase joints_daily insert warning:', e.message);
-      }
-    }
 
     const actionText = `قام (${req.user.name}) بتسجيل جرد الجوينات ليوم ${record.report_date} - المجموع: ${jointsTotal(record.data).toLocaleString('en-US')} متر`;
     await dbRun(
@@ -1676,22 +1684,19 @@ app.put('/api/joints-daily/:id', requireEditor, async (req, res) => {
   const updatedAt = new Date().toISOString();
 
   try {
+    let cloudUpdated = false;
+    if (isSupabaseActive()) {
+      const { data, error } = await withTimeout(
+        supabase.from('joints_daily').update({ ...clean, updated_at: updatedAt }).eq('id', id).select('id'), 10000);
+      if (error) return res.status(502).json({ error: jointsCloudError(error) });
+      cloudUpdated = Array.isArray(data) && data.length > 0;
+    }
+
     const result = await sqliteRun(
       'UPDATE joints_daily SET report_date = ?, workers_count = ?, notes = ?, data = ?, updated_at = ? WHERE id = ?',
       [clean.report_date, clean.workers_count, clean.notes, JSON.stringify(clean.data), updatedAt, id]
     );
     await mirrorJointsToJson();
-
-    let cloudUpdated = false;
-    if (isSupabaseActive()) {
-      try {
-        const { error } = await supabase.from('joints_daily').update({ ...clean, updated_at: updatedAt }).eq('id', id);
-        cloudUpdated = !error;
-        if (error) console.warn('Supabase joints_daily update warning:', error.message);
-      } catch (e) {
-        console.warn('Supabase joints_daily update warning:', e.message);
-      }
-    }
 
     if (!result.changes && !cloudUpdated) return res.status(404).json({ error: 'السجل غير موجود.' });
     res.json({ id, ...clean, updated_at: updatedAt });
@@ -1704,16 +1709,12 @@ app.put('/api/joints-daily/:id', requireEditor, async (req, res) => {
 app.delete('/api/joints-daily/:id', requireEditor, async (req, res) => {
   const { id } = req.params;
   try {
+    if (isSupabaseActive()) {
+      const { error } = await withTimeout(supabase.from('joints_daily').delete().eq('id', id), 10000);
+      if (error) return res.status(502).json({ error: jointsCloudError(error) });
+    }
     await sqliteRun('DELETE FROM joints_daily WHERE id = ?', [id]);
     await mirrorJointsToJson();
-    if (isSupabaseActive()) {
-      try {
-        const { error } = await supabase.from('joints_daily').delete().eq('id', id);
-        if (error) console.warn('Supabase joints_daily delete warning:', error.message);
-      } catch (e) {
-        console.warn('Supabase joints_daily delete warning:', e.message);
-      }
-    }
     res.json({ success: true });
   } catch (err) {
     console.error('Delete joints_daily error:', err);

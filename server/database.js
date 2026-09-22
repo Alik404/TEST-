@@ -291,6 +291,9 @@ export const syncFromCloudToLocal = async () => {
 
     // 11. Sync Daily Joints Progress (if present in Supabase)
     const jointsRes = await safeSupa(supabase.from('joints_daily').select('*').order('report_date', { ascending: false }));
+    if (!jointsRes) {
+      console.warn('joints_daily is not readable in Supabase. Run supabase_joints_daily.sql in the Supabase SQL Editor; until then joints records cannot be saved.');
+    }
     if (jointsRes && !jointsRes.error && Array.isArray(jointsRes.data)) {
       await sqliteRun('DELETE FROM joints_daily');
       for (const j of jointsRes.data) {
