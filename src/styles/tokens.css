@@ -39,6 +39,7 @@
   --warn:         #b45309;  --warn-soft:    #fdf6ea;
   --danger:       #b91c1c;  --danger-soft:  #fbeaea;
   --danger-solid: #b91c1c;  --danger-solid-hover: #991b1b;
+  --warn-solid:   #b45309;  --warn-solid-hover:   #92400e;  --warn-on: #ffffff;
   --info:         #0369a1;  --info-soft:    #e5f1f8;
 
   /* Data visualisation */
@@ -176,6 +177,7 @@
   --warn:         #fbbf24;  --warn-soft:    #2a2110;
   --danger:       #f87171;  --danger-soft:  #2c1618;
   --danger-solid: #dc2626;  --danger-solid-hover: #b91c1c;
+  --warn-solid:   #fbbf24;  --warn-solid-hover:   #fcd34d;  --warn-on: #1c1403;
   --info:         #38bdf8;  --info-soft:    #0c2230;
 
   --viz-white:  #d4d4d8;

@@ -122,6 +122,13 @@
   --btn-bg-hover: var(--danger-solid-hover);
 }
 
+.btn--warn {
+  --btn-bg: var(--warn-solid);
+  --btn-fg: var(--warn-on);
+  --btn-border: var(--warn-solid);
+  --btn-bg-hover: var(--warn-solid-hover);
+}
+
 .btn--danger-ghost {
   --btn-bg: transparent;
   --btn-fg: var(--danger);

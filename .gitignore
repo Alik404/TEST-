@@ -36,6 +36,9 @@ server/project.db
 server/data/materials_consumption.json
 server/uploads/*
 !server/uploads/.gitkeep
+# Handover notes local-development store (production uses Supabase)
+server/data/handover_local.json
+server/handover_local/
 
 # AI Agent & Workspace Skill Directories (Excluded from Repo)
 .agent/

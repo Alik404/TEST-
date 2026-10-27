@@ -1,6 +1,6 @@
 import {
   BarChart3, LayoutDashboard, ClipboardList, Boxes, Layers,
-  FileText, Banknote, Receipt, MessageSquare, Users, Ruler
+  FileText, Banknote, Receipt, MessageSquare, Users, Ruler, ClipboardCheck
 } from 'lucide-react';
 
 /**
@@ -9,7 +9,7 @@ import {
  * or restricted in exactly one place.
  *
  * roles: who may see the section (omitted = everyone signed in).
- * bottom: shown directly in the phone bottom bar (max 4; the 5th slot is "More").
+ * bottom: shown directly in the phone bottom bar (max 5; the last slot is "More").
  */
 export const SECTIONS = [
   {
@@ -40,6 +40,16 @@ export const SECTIONS = [
     short: { ar: 'الماربلكس', en: 'Marblex' },
     titleKey: 'headerMarblexTitle',
     subtitleKey: 'headerMarblexSubtitle',
+    bottom: true,
+  },
+  {
+    id: 'handover',
+    group: 'site',
+    icon: ClipboardCheck,
+    label: { ar: 'ملاحظات الاستلام', en: 'Handover Notes' },
+    short: { ar: 'الاستلام', en: 'Handover' },
+    titleKey: 'headerHandoverTitle',
+    subtitleKey: 'headerHandoverSubtitle',
     bottom: true,
   },
   {

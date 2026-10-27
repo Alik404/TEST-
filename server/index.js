@@ -23,6 +23,7 @@ import {
   requireAuth, requireEditor, requireSuperAdmin,
   parseUpload
 } from './auth.js';
+import { registerHandoverRoutes } from './handover.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -1723,6 +1724,9 @@ app.delete('/api/joints-daily/:id', requireEditor, async (req, res) => {
     res.status(500).json({ error: 'تعذر حذف جرد الجوينات.' });
   }
 });
+
+// ── 11. Handover notes and polishing handover register (server/handover.js) ──
+registerHandoverRoutes(app);
 
 app.get('/*any', (req, res, next) => {
   if (req.path.startsWith('/api')) {

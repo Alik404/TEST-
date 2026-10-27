@@ -31,6 +31,7 @@ const UsersManagement = lazy(() => import('./components/UsersManagement'));
 const ExecutiveSummary = lazy(() => import('./components/ExecutiveSummary'));
 const MarblexProgress = lazy(() => import('./components/MarblexProgress'));
 const JointsDaily = lazy(() => import('./components/JointsDaily'));
+const HandoverNotes = lazy(() => import('./components/handover/HandoverNotes'));
 
 const DEFAULT_TAB = 'dashboard';
 
@@ -336,6 +337,8 @@ export default function App() {
         return <MarblexProgress {...common} />;
       case 'joints-daily':
         return <JointsDaily {...common} />;
+      case 'handover':
+        return <HandoverNotes {...common} />;
       case 'materials-consumption':
         return <MaterialsConsumption {...common} />;
       case 'workers-wages':
