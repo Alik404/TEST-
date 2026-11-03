@@ -1,0 +1,13 @@
+.operations-icon { inline-size: var(--space-5); block-size: var(--space-5); flex-shrink: 0; }
+.operations-events { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+.operations-event { padding: var(--space-4); background: var(--surface-2); border-radius: var(--radius-sm); min-inline-size: 0; overflow-wrap: anywhere; }
+.operations-event-heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.operations-event-heading time { font-size: var(--text-xs); color: var(--fg-2); margin-inline-start: auto; }
+.operations-details { margin-block-start: var(--space-3); }
+.operations-details summary { cursor: pointer; color: var(--accent); font-weight: var(--weight-semibold); padding-block: var(--space-2); }
+.operations-details summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.operations-changes { display: grid; gap: var(--space-4); margin-block-start: var(--space-3); }
+.operations-changes dt { font-weight: var(--weight-semibold); }
+.operations-changes dd { margin: 0; margin-block-start: var(--space-2); }
+.operations-changes dd > span { color: var(--fg-2); font-size: var(--text-xs); }
+.operations-changes pre { white-space: pre-wrap; overflow-wrap: anywhere; max-inline-size: 100%; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--fg); margin: 0; }

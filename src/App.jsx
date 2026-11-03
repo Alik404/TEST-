@@ -28,6 +28,7 @@ const MaterialsConsumption = lazy(() => import('./components/MaterialsConsumptio
 const WorkersWages = lazy(() => import('./components/WorkersWages'));
 const WeeklyAdvance = lazy(() => import('./components/WeeklyAdvance'));
 const UsersManagement = lazy(() => import('./components/UsersManagement'));
+const AdminOperations = lazy(() => import('./components/AdminOperations'));
 const ExecutiveSummary = lazy(() => import('./components/ExecutiveSummary'));
 const MarblexProgress = lazy(() => import('./components/MarblexProgress'));
 const JointsDaily = lazy(() => import('./components/JointsDaily'));
@@ -349,6 +350,8 @@ export default function App() {
         return <DailyUpdates {...common} />;
       case 'users-management':
         return <UsersManagement currentUser={user} t={t} lang={lang} />;
+      case 'admin-operations':
+        return <AdminOperations lang={lang} />;
       case 'dashboard':
       default:
         return (

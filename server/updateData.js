@@ -53,7 +53,7 @@ async function runUpdates() {
   for (const item of allData) {
     const { code, ...updates } = item;
     // We update the row in sub_units where code matches
-    const { data, error } = await db
+    const { error } = await db
       .from('sub_units')
       .update(updates)
       .eq('code', code);

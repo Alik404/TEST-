@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { supabase, isSupabaseActive, withTimeout, sqliteAll } from './database.js';
+import { dataRoot } from './config.js';
+import { supabase, isSupabaseActive, withTimeout, sqliteAll, sqliteGet, sqliteRun, localMutation, auditLocal } from './database.js';
+import { cloudMutation } from './audit-context.js';
 import { requireAuth, parseUpload } from './auth.js';
 
 // ── Handover notes (ملاحظات الاستلام) ────────────────────────────────────────
@@ -15,7 +16,7 @@ import { requireAuth, parseUpload } from './auth.js';
 // Supabase (local development) the same API runs on a JSON file and a private
 // folder next to this file.
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = dataRoot;
 
 const NOTE_TYPES = new Set(['joints', 'polishing', 'cleaning', 'cracks', 'other']);
 const REJECT_REASONS = new Set(['duplicate', 'inaccurate', 'out_of_scope', 'resolved']);
@@ -60,25 +61,21 @@ const cloudStore = {
   mode: 'cloud',
   listNotes: () => must(supabase.from('handover_notes').select('*').order('created_at', { ascending: true }), 15000),
   getNote: (id) => must(supabase.from('handover_notes').select('*').eq('id', id).maybeSingle()),
-  insertNote: (row) => must(supabase.from('handover_notes').insert([row]).select().single()),
+  insertNote: (row) => cloudMutation(supabase, 'handover_notes', 'insert', row),
   // Updates only while the note is still in the status the caller read, so two
   // reviewers acting at once cannot both change it. Returns null on a conflict.
   updateNote: async (id, patch, expectedStatus) => {
-    let q = supabase.from('handover_notes').update(patch).eq('id', id);
-    if (expectedStatus) q = q.eq('status', expectedStatus);
-    const rows = await must(q.select());
-    return rows?.[0] || null;
+    return cloudMutation(supabase, 'handover_notes', 'update', patch, id, expectedStatus ? { status: expectedStatus } : null);
   },
-  deleteNote: (id) => must(supabase.from('handover_notes').delete().eq('id', id)),
-  nextSeq: (level, kind) => must(supabase.rpc('handover_next_seq', { p_level: level, p_kind: kind })),
+  deleteNote: (id) => cloudMutation(supabase, 'handover_notes', 'delete', {}, id),
+  nextSeq: (level, kind) => cloudMutation(supabase, 'handover_counters', 'next_seq', { level, kind }),
   readSettings: async () => {
     const rows = await must(supabase.from('handover_settings').select('key, value'));
     return Object.fromEntries((rows || []).map(r => [r.key, r.value]));
   },
-  writeSetting: (key, value) => must(
-    supabase.from('handover_settings').upsert({ key, value, updated_at: new Date().toISOString() })),
+  writeSetting: (key, value) => cloudMutation(supabase, 'handover_settings', 'upsert', { key, value, updated_at: new Date().toISOString() }),
   listReceipts: () => must(supabase.from('handover_receipts').select('*')),
-  upsertReceipt: (row) => must(supabase.from('handover_receipts').upsert(row).select().single()),
+  upsertReceipt: (row) => cloudMutation(supabase, 'handover_receipts', 'upsert', row),
   putPhoto: (objectPath, buffer) => must(
     supabase.storage.from(BUCKET).upload(objectPath, buffer, { contentType: 'image/jpeg', cacheControl: '86400', upsert: false }),
     30000),
@@ -123,34 +120,50 @@ const emptyLocal = () => ({
   receipts: [],
 });
 
-const readLocal = () => {
+export const readHandoverLocal = async () => {
+  const stored = await sqliteGet('SELECT data FROM handover_state WHERE id = 1');
+  if (stored) return { ...emptyLocal(), ...JSON.parse(stored.data) };
   try {
     return { ...emptyLocal(), ...JSON.parse(fs.readFileSync(LOCAL_FILE, 'utf8')) };
-  } catch {
-    return emptyLocal();
+  } catch (error) {
+    if (error.code === 'ENOENT') return emptyLocal();
+    throw error;
   }
 };
+const readLocal = readHandoverLocal;
 
-let localQueue = Promise.resolve();
-// Serialises read-modify-write cycles on the JSON file.
-const mutateLocal = (fn) => {
-  const run = localQueue.then(() => {
-    const db = readLocal();
+const handoverRows = (data) => ({
+  handover_notes: Object.fromEntries(data.notes.map(row => [row.id, row])),
+  handover_receipts: Object.fromEntries(data.receipts.map(row => [row.level, row])),
+  handover_settings: Object.fromEntries(Object.entries(data.settings).map(([key, value]) => [key, { key, value }])),
+  handover_counters: Object.fromEntries(Object.entries(data.counters).map(([key, last_value]) => [key, { key, last_value }])),
+});
+
+// Import legacy JSON on the first edit. The state and audit now share SQLite's
+// transaction; the original file remains available for recovery.
+const mutateLocal = (fn) => localMutation(async () => {
+    const db = await readLocal();
+    const before = handoverRows(structuredClone(db));
     const result = fn(db);
-    fs.mkdirSync(path.dirname(LOCAL_FILE), { recursive: true });
-    fs.writeFileSync(LOCAL_FILE, JSON.stringify(db, null, 2), 'utf8');
+    const after = handoverRows(db);
+    for (const table of Object.keys(before)) {
+      for (const id of new Set([...Object.keys(before[table]), ...Object.keys(after[table])])) {
+        const old = before[table][id], saved = after[table][id];
+        if (JSON.stringify(old) !== JSON.stringify(saved)) {
+          await auditLocal(table, !old ? 'insert' : !saved ? 'delete' : 'update', id, old, saved);
+        }
+      }
+    }
+    await sqliteRun('INSERT INTO handover_state (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data', [JSON.stringify(db)]);
     return result;
-  });
-  localQueue = run.catch(() => {});
-  return run;
-};
+});
 
 const signLocal = (p, exp) => crypto.createHmac('sha256', LOCAL_URL_KEY).update(`${p}.${exp}`).digest('hex');
 
 const localStore = {
   mode: 'local',
-  listNotes: async () => readLocal().notes,
-  getNote: async (id) => readLocal().notes.find(n => n.id === id) || null,
+  listNotes: async () => (await readLocal()).notes,
+  getNote: async (id) => (await readLocal()).notes.find(n => n.id === id) || null,
   insertNote: (row) => mutateLocal(db => {
     db.notes.push(row);
     return row;
@@ -169,11 +182,11 @@ const localStore = {
     db.counters[key] = (db.counters[key] || 0) + 1;
     return db.counters[key];
   }),
-  readSettings: async () => readLocal().settings,
+  readSettings: async () => (await readLocal()).settings,
   writeSetting: (key, value) => mutateLocal(db => {
     db.settings[key] = value;
   }),
-  listReceipts: async () => readLocal().receipts,
+  listReceipts: async () => (await readLocal()).receipts,
   upsertReceipt: (row) => mutateLocal(db => {
     db.receipts = db.receipts.filter(r => r.level !== row.level).concat(row);
     return row;

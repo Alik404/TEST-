@@ -6,18 +6,24 @@
  * an admin interface it no longer has the rights to use.
  */
 
+import { toast } from './toast';
+
 const TOKEN_KEY = 'project_token';
 const USER_KEY = 'project_user';
+let memoryToken = null;
+let memoryUser = null;
 
 export const getToken = () => {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return memoryToken || localStorage.getItem(TOKEN_KEY);
   } catch {
-    return null;
+    return memoryToken;
   }
 };
 
 export const setSession = (user, token) => {
+  memoryToken = token;
+  memoryUser = user;
   try {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     localStorage.setItem(TOKEN_KEY, token);
@@ -27,6 +33,8 @@ export const setSession = (user, token) => {
 };
 
 export const clearSession = () => {
+  memoryToken = null;
+  memoryUser = null;
   try {
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(TOKEN_KEY);
@@ -36,6 +44,7 @@ export const clearSession = () => {
 };
 
 export const getStoredUser = () => {
+  if (memoryUser) return memoryUser;
   try {
     const raw = localStorage.getItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -56,8 +65,8 @@ export const setUnauthorizedHandler = (handler) => {
 
 /**
  * fetch() with the session token attached.
- * Same signature and return value as fetch, so call sites keep using res.ok /
- * res.json() exactly as before.
+ * Returns a Response on success. Failed mutations throw the server's message
+ * so existing callers cannot replace a storage failure with a generic error.
  */
 export const apiFetch = async (path, options = {}) => {
   const token = getToken();
@@ -72,6 +81,15 @@ export const apiFetch = async (path, options = {}) => {
 
   if (res.status === 401) {
     onUnauthorized();
+  }
+
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase());
+  if (mutation && !res.ok) {
+    throw new Error(await apiErrorMessage(res.clone(), 'تعذّر إكمال العملية. أعد المحاولة.'));
+  }
+  if (mutation && res.ok && res.headers.get('X-Storage-Mode') === 'local' && res.headers.get('Content-Type')?.includes('application/json')) {
+    const isAr = document.documentElement.lang !== 'en';
+    toast.info(isAr ? 'تم الحفظ محلياً على الخادم. التخزين السحابي غير مفعّل.' : 'Saved on this server. Cloud storage is not enabled.');
   }
 
   return res;

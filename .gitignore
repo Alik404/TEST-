@@ -1,5 +1,6 @@
 # Logs
 logs
+.qa/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -58,10 +59,16 @@ frameworks/
 taste/
 tokens/
 workflows/
+!.github/workflows/
+!.github/workflows/app-ci.yml
 scripts/
 *.cjs
 extracted_ui_changes.json
 dashboard_changes.json
 design-system.md
 design-system-tech.md
-
+graphify-out/
+src/graphify-out/
+server/graphify-out/
+graphify-tool/
+.env.bak

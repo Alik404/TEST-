@@ -1,62 +1,46 @@
-import dotenv from 'dotenv';
+import { dataRoot } from './config.js';
 import { createClient } from '@supabase/supabase-js';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { hashPassword } from './auth.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const envPath = path.resolve(__dirname, '../.env');
-
-// Force override from .env so any old process.env inherited by nodemon is overwritten
-dotenv.config({ path: envPath, override: true });
-dotenv.config({ override: true });
-
-const dbPath = path.join(__dirname, 'project.db');
-const sqliteDb = new sqlite3.Database(dbPath);
+import { hashPassword, setAccountLookup } from './auth.js';
+import { createPersistence, cloudResult, DataError, withTimeout } from './persistence.js';
+import crypto from 'node:crypto';
+import { auditActor, redactAudit } from './audit-context.js';
+export { withTimeout, normalizeRecord } from './persistence.js';
 
 // Credentials come from the environment only — never hardcoded in source.
 // See .env.example. If they are absent the server runs on local SQLite alone.
 const DECOMMISSIONED_PROJECT_REF = 'xzlsrqtptuspoqovbgpg';
 
-let supabaseUrl = process.env.SUPABASE_URL;
-let supabaseKey = process.env.SUPABASE_KEY;
+const supabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseKey = process.env.SUPABASE_KEY?.trim();
 
 if (supabaseUrl && supabaseUrl.includes(DECOMMISSIONED_PROJECT_REF)) {
-  console.warn(
-    'SUPABASE_URL points at the decommissioned project. Ignoring it and staying on local SQLite. ' +
-      'Update SUPABASE_URL in the environment.'
-  );
-  supabaseUrl = null;
+  throw new Error('SUPABASE_URL points at the decommissioned project. Update it before starting the server.');
 }
 
-if (!supabaseUrl || !supabaseKey) {
+if (Boolean(supabaseUrl) !== Boolean(supabaseKey)) {
+  throw new Error('SUPABASE_URL and SUPABASE_KEY must both be set. Refusing to switch cloud writes to local storage.');
+}
+if (!supabaseUrl && !supabaseKey) {
   console.warn(
     'SUPABASE_URL / SUPABASE_KEY are not set. Running on local SQLite only — ' +
       'writes will NOT persist across a redeploy on an ephemeral filesystem.'
   );
-  supabaseUrl = null;
-  supabaseKey = null;
 }
 
 let supabase = null;
 let useSupabase = false;
-let supabaseReady = false;
 
 if (supabaseUrl && supabaseKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseKey);
     useSupabase = true;
-    supabaseReady = true;
     console.log('Initialized Supabase client (Primary Cloud Database active).');
 
     // Async verification test in background without disabling on initial latency
-    Promise.race([
-      supabase.from('categories').select('id').limit(1),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Initial ping timeout (8s)')), 8000))
-    ])
+    withTimeout(supabase.from('categories').select('id').limit(1), 8000)
       .then((result) => {
         if (result && result.error) throw result.error;
         console.log('Supabase cloud connection verified successfully.');
@@ -65,20 +49,16 @@ if (supabaseUrl && supabaseKey) {
         console.warn('Supabase cloud initial ping warning (will retry on incoming requests):', err.message || err);
       });
   } catch (err) {
-    console.warn('Failed to initialize Supabase client:', err.message);
-    useSupabase = false;
-    supabaseReady = false;
+    throw new Error('Failed to initialize Supabase. Refusing to switch cloud writes to local storage.', { cause: err });
   }
 }
 
-export const isSupabaseActive = () => Boolean(useSupabase && supabase);
+const __dirname = dataRoot;
+fs.mkdirSync(dataRoot, { recursive: true });
+const dbPath = path.join(dataRoot, 'project.db');
+const sqliteDb = new sqlite3.Database(dbPath);
 
-export const withTimeout = (promise, ms = 8000) => {
-  return Promise.race([
-    Promise.resolve(promise).catch(err => ({ data: null, error: err })),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Supabase timeout (${ms}ms)`)), ms))
-  ]);
-};
+export const isSupabaseActive = () => Boolean(useSupabase && supabase);
 
 // Safe Supabase call wrapper — guarantees no unhandled errors and does not disable cloud permanently
 export const safeSupa = async (supabaseCall, fallbackValue = null) => {
@@ -124,6 +104,39 @@ export const sqliteRun = (sql, params = []) => {
   });
 };
 
+// Every local business mutation and its audit event commit together. Share the
+// queue with handover changes so concurrent requests cannot nest transactions.
+let localChanges = Promise.resolve();
+export const localMutation = (action) => {
+  const result = localChanges.then(async () => {
+    await sqliteRun('BEGIN IMMEDIATE');
+    try {
+      const saved = await action();
+      await sqliteRun('COMMIT');
+      return saved;
+    } catch (error) {
+      await sqliteRun('ROLLBACK');
+      throw error;
+    }
+  });
+  localChanges = result.catch(() => {});
+  return result;
+};
+
+export const auditLocal = async (table, action, id, before, after) => {
+  const actor = auditActor();
+  const changed = [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
+    .filter(key => JSON.stringify(before?.[key]) !== JSON.stringify(after?.[key]) && key !== 'session_version');
+  await sqliteRun(`INSERT INTO audit_events
+    (id, actor_id, actor_name, actor_role, request_id, entity_table, record_id, action, before_data, after_data, changed_fields, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [crypto.randomUUID(), actor.id, actor.name, actor.role, actor.request_id, table, String(id), action,
+    before == null ? null : JSON.stringify(redactAudit(before)), after == null ? null : JSON.stringify(redactAudit(after)),
+    JSON.stringify(changed), new Date().toISOString()]);
+};
+
+export const closeDatabase = () => new Promise((resolve, reject) => sqliteDb.close(error => error ? reject(error) : resolve()));
+
 // ── JSON file helpers for persistent local offline fallback ─────────────────
 export const getJsonFallback = (filename, defaultVal = []) => {
   try {
@@ -142,10 +155,40 @@ export const saveJsonFallback = (filename, data) => {
     const dataDir = path.join(__dirname, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     const fp = path.join(dataDir, filename);
-    fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf8');
+    const temporary = `${fp}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(temporary, fp);
     return true;
   } catch {
     return false;
+  }
+};
+
+export const records = createPersistence({
+  cloud: () => isSupabaseActive() ? supabase : null,
+  sqlGet: sqliteGet, sqlAll: sqliteAll, sqlRun: sqliteRun, saveJson: saveJsonFallback,
+  atomic: localMutation, audit: auditLocal,
+});
+setAccountLookup(id => records.get('users', id));
+
+export const findUserByEmail = async (email) => {
+  if (isSupabaseActive()) {
+    return cloudResult(supabase.from('users')
+      .select('id,email,name,role,password,session_version').eq('email', email).maybeSingle());
+  }
+  return sqliteGet('SELECT * FROM users WHERE LOWER(email) = LOWER(?)', [email]);
+};
+
+// A secondary activity message must not turn a committed primary save into a
+// reported failure that invites the user to submit the original operation again.
+export const logActivity = async (message) => {
+  try {
+    await records.insert('daily_updates', {
+      user_id: null, sender_name: 'النظام', sender_role: 'system', message_text: message,
+      media_url: null, media_type: null, reply_to_id: null, created_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Activity log failed after saving the record:', error.message);
   }
 };
 
@@ -266,11 +309,12 @@ export const syncFromCloudToLocal = async () => {
 
     // 9. Sync Users
     const userRes = await safeSupa(supabase.from('users').select('*').order('id', { ascending: true }));
-    if (userRes && !userRes.error && Array.isArray(userRes.data) && userRes.data.length > 0) {
+    if (userRes && !userRes.error && Array.isArray(userRes.data)) {
+      await sqliteRun('DELETE FROM users');
       for (const u of userRes.data) {
         await sqliteRun(
-          'INSERT OR REPLACE INTO users (id, email, password, name, role) VALUES (?, ?, ?, ?, ?)',
-          [u.id, u.email, u.password, u.name, u.role]
+          'INSERT OR REPLACE INTO users (id, email, password, name, role, session_version) VALUES (?, ?, ?, ?, ?, ?)',
+          [u.id, u.email, u.password, u.name, u.role, u.session_version || '']
         );
       }
     }
@@ -315,6 +359,14 @@ export const syncFromCloudToLocal = async () => {
 // ── Automatic Schema Initialization & Seed Migration ───────────────────────
 export const initDatabase = async () => {
   try {
+    await sqliteRun(`CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY, actor_id TEXT, actor_name TEXT NOT NULL, actor_role TEXT NOT NULL,
+      request_id TEXT NOT NULL, entity_table TEXT NOT NULL, record_id TEXT NOT NULL,
+      action TEXT NOT NULL, before_data TEXT, after_data TEXT, changed_fields TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+    await sqliteRun('CREATE INDEX IF NOT EXISTS audit_events_time ON audit_events(created_at DESC, id DESC)');
+    await sqliteRun('CREATE TABLE IF NOT EXISTS handover_state (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)');
     // 1. Users table
     await sqliteRun(`
       CREATE TABLE IF NOT EXISTS users (
@@ -323,9 +375,16 @@ export const initDatabase = async () => {
         password TEXT NOT NULL,
         name TEXT NOT NULL,
         role TEXT NOT NULL,
+        session_version TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    const userColumns = await sqliteAll('PRAGMA table_info(users)');
+    if (!userColumns.some(c => c.name === 'session_version')) {
+      await sqliteRun("ALTER TABLE users ADD COLUMN session_version TEXT NOT NULL DEFAULT ''");
+      await sqliteRun('UPDATE users SET session_version = lower(hex(randomblob(16)))');
+    }
 
     // 2. Categories table
     await sqliteRun(`
@@ -374,6 +433,12 @@ export const initDatabase = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Preserve the existing quantity column while hydrating older local databases.
+    const subColumns = await sqliteAll('PRAGMA table_info(sub_units)');
+    if (!subColumns.some(c => c.name === 'total_quantity')) {
+      await sqliteRun('ALTER TABLE sub_units ADD COLUMN total_quantity REAL DEFAULT 0');
+    }
 
     // 5. Marble distribution table
     await sqliteRun(`
@@ -426,6 +491,12 @@ export const initDatabase = async () => {
         updated_at DATETIME
       )
     `);
+
+    // Additive upgrades for databases created before material photos/notes.
+    const materialColumns = new Set((await sqliteAll('PRAGMA table_info(materials_consumption)')).map(c => c.name));
+    for (const column of ['basics_notes', 'marble_notes', 'sealants_notes', 'bulk_notes', 'site_images']) {
+      if (!materialColumns.has(column)) await sqliteRun(`ALTER TABLE materials_consumption ADD COLUMN ${column} TEXT`);
+    }
 
     // 8. Workers wages table migration to support both schemas
     await sqliteRun(`
@@ -521,6 +592,8 @@ export const initDatabase = async () => {
       }
     }
 
+    await sqliteRun("UPDATE users SET session_version = lower(hex(randomblob(16))) WHERE session_version = ''");
+
     // Sync Materials Consumption if SQLite is empty
     const consumptionCount = await sqliteGet('SELECT COUNT(*) as count FROM materials_consumption');
     if (!consumptionCount || consumptionCount.count === 0) {
@@ -528,8 +601,8 @@ export const initDatabase = async () => {
         const jsonReports = getJsonFallback('materials_consumption.json', []);
         for (const rep of jsonReports) {
           await sqliteRun(`
-            INSERT INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO materials_consumption (id, date, day, start_time, end_time, prepared_by, basics, marble, sealants, bulk, notes, created_at, basics_notes, marble_notes, sealants_notes, bulk_notes, site_images)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
             rep.id,
             rep.date,
@@ -542,7 +615,9 @@ export const initDatabase = async () => {
             typeof rep.sealants === 'object' ? JSON.stringify(rep.sealants) : (rep.sealants || '{}'),
             typeof rep.bulk === 'object' ? JSON.stringify(rep.bulk) : (rep.bulk || '{}'),
             rep.notes || '',
-            rep.created_at || new Date().toISOString()
+            rep.created_at || new Date().toISOString(),
+            rep.basics_notes || '', rep.marble_notes || '', rep.sealants_notes || '', rep.bulk_notes || '',
+            typeof rep.site_images === 'string' ? rep.site_images : JSON.stringify(rep.site_images || [])
           ]);
         }
       }
@@ -652,96 +727,34 @@ export const initDatabase = async () => {
     console.log('Database schema & records verified successfully.');
   } catch (err) {
     console.error('Database initialization error:', err);
+    throw err;
   }
 };
 
-// Initialize immediately on module load
-initDatabase();
+// The server awaits initialization before accepting requests.
+export const databaseReady = initDatabase();
 
 // ── Unified Database Abstraction ────────────────────────────────────────────
 
 export const dbRun = async (sql, params = []) => {
-  if (isSupabaseActive()) {
-    try {
-      const sqlClean = sql.replace(/\s+/g, ' ').trim();
-
-      if (sqlClean.includes('UPDATE sub_units SET status = ?, notes = ? WHERE id = ?')) {
-        const [status, notes, id] = params;
-        const result = await safeSupa(supabase.from('sub_units').update({ status, notes }).eq('id', id));
-        if (result && !result.error) {
-          sqliteRun(sql, params).catch(() => {});
-          return { changes: 1 };
-        }
-      }
-
-      if (sqlClean.includes('UPDATE sub_units SET white_marked = ?')) {
-        const [white_marked, white_extra, white_applied, white_date, brown_marked, brown_extra, brown_applied, brown_date, status, notes, id] = params;
-        const result = await safeSupa(supabase.from('sub_units').update({
-          white_marked, white_extra, white_applied, white_date,
-          brown_marked, brown_extra, brown_applied, brown_date,
-          status, notes
-        }).eq('id', id));
-        if (result && !result.error) {
-          sqliteRun(sql, params).catch(() => {});
-          return { changes: 1 };
-        }
-      }
-
-      if (sqlClean.includes('UPDATE tasks SET')) {
-        const updateData = {};
-        const paramList = [...params];
-        const taskId = paramList[paramList.length - 1]; // Last parameter is always the WHERE id = ?
-
-        if (sqlClean.includes('completed_quantity = ?') && sqlClean.includes('progress_percent = ?')) {
-          const completedFirst = sqlClean.indexOf('completed_quantity') < sqlClean.indexOf('progress_percent');
-          updateData.completed_quantity = params[completedFirst ? 0 : 1];
-          updateData.progress_percent = params[completedFirst ? 1 : 0];
-          if (sqlClean.includes('notes = ?')) {
-            updateData.notes = params[2];
-          }
-        } else if (sqlClean.includes('notes = ?')) {
-          updateData.notes = params[0];
-        } else if (sqlClean.includes('progress_percent = ?')) {
-          updateData.progress_percent = params[0];
-        }
-
-        const result = await safeSupa(supabase.from('tasks').update(updateData).eq('id', taskId));
-        if (result && !result.error) {
-          sqliteRun(sql, params).catch(() => {});
-          return { changes: 1 };
-        }
-      }
-
-      if (sqlClean.includes('INSERT INTO daily_updates')) {
-        let user_id = null, sender_name = '', sender_role = '', message_text = '', media_url = null, media_type = null, reply_to_id = null;
-        if (sqlClean.includes('VALUES (null, ?, ?, ?, null, null, null)') || sqlClean.includes('VALUES (NULL, ?, ?, ?, NULL, NULL, NULL)')) {
-          [sender_name, sender_role, message_text] = params;
-        } else {
-          [user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id] = params;
-        }
-        const result = await safeSupa(supabase.from('daily_updates').insert([{
-          user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id
-        }]).select().single());
-        if (result && result.data && !result.error) {
-          sqliteRun(sql, params).catch(() => {});
-          return { id: result.data.id, changes: 1 };
-        }
-      }
-
-      if (sqlClean.includes('UPDATE marble_distribution SET status = ?, white_qty = ?, brown_qty = ? WHERE id = ?')) {
-        const [status, white_qty, brown_qty, id] = params;
-        const result = await safeSupa(supabase.from('marble_distribution').update({ status, white_qty, brown_qty }).eq('id', id));
-        if (result && !result.error) {
-          sqliteRun(sql, params).catch(() => {});
-          return { changes: 1 };
-        }
-      }
-    } catch (supabaseErr) {
-      console.warn('Supabase dbRun fallback:', supabaseErr?.message || supabaseErr);
-    }
+  if (!isSupabaseActive()) return sqliteRun(sql, params);
+  const clean = sql.replace(/\s+/g, ' ').trim();
+  const update = clean.match(/^UPDATE (tasks|sub_units|marble_distribution) SET (.+) WHERE id = \?$/i);
+  if (update) {
+    const fields = update[2].split(',').map(field => field.trim().match(/^(\w+) = \?$/)?.[1]);
+    if (fields.some(field => !field)) throw new Error('Unsupported update statement.');
+    const row = await records.update(update[1], params.at(-1), Object.fromEntries(fields.map((field, i) => [field, params[i]])));
+    return { id: row.id, changes: 1, row };
   }
-
-  return sqliteRun(sql, params);
+  if (clean.startsWith('INSERT INTO daily_updates')) {
+    const system = /VALUES \(NULL,/i.test(clean);
+    const [user_id, sender_name, sender_role, message_text, media_url, media_type, reply_to_id] =
+      system ? [null, ...params, null, null, null] : params;
+    const row = await records.insert('daily_updates', { user_id, sender_name, sender_role,
+      message_text, media_url, media_type, reply_to_id, created_at: new Date().toISOString() });
+    return { id: row.id, changes: 1, row };
+  }
+  throw new DataError(400, 'هذه العملية غير مدعومة في وضع التخزين السحابي.', 'UNSUPPORTED_CLOUD_WRITE');
 };
 
 export const dbGet = async (sql, params = []) => {
