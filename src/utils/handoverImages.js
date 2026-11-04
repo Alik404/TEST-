@@ -26,6 +26,7 @@ const EXPORT = {
 };
 
 const FONT_FAMILY = "Cairo, 'Segoe UI', Tahoma, sans-serif";
+const hasArabic = (text) => /[\u0600-\u06FF]/.test(String(text));
 const font = (weight, size) => `${weight} ${size}px ${FONT_FAMILY}`;
 
 // Arabic and Latin samples, so both unicode-range parts of Cairo are fetched.
@@ -227,7 +228,7 @@ export async function renderNoteImage({ photo, number, level, typeLabel, date, t
   const colW = (W - P * 2) / 4;
   const columns = [
     { label: 'رقم الملاحظة', value: number, badge: true },
-    { label: 'النزلة', value: level },
+    { label: 'النزلة', value: level, arabic: hasArabic(level) },
     { label: 'النوع', value: typeLabel, arabic: true },
     { label: 'التاريخ', value: date },
   ];
@@ -322,10 +323,11 @@ export async function renderLevelCover({ level, noteCount, imageCount, date, num
   ctx.direction = 'rtl';
   ctx.fillStyle = EXPORT.label;
   ctx.font = font(600, 44);
-  ctx.fillText('ملاحظات الاستلام — النزلة', W / 2, titleY);
+  ctx.fillText(hasArabic(level) ? 'ملاحظات الاستلام — عامة' : 'ملاحظات الاستلام — النزلة', W / 2, titleY);
 
-  // The level code in a badge, drawn left to right on its own.
-  ctx.direction = 'ltr';
+  // The level code in a badge, drawn left to right on its own
+  // ("all levels" is Arabic text and is drawn right to left).
+  ctx.direction = hasArabic(level) ? 'rtl' : 'ltr';
   const levelSize = fitFont(ctx, level, 700, 120, W - P * 4, 60);
   const boxW = Math.min(W - P * 2, ctx.measureText(level).width + 120);
   const boxH = levelSize + 70;

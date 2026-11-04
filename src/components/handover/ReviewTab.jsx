@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import { CircleCheck, Clock, Ban, Pencil, ListChecks, TriangleAlert } from 'lucide-react';
 import { EmptyState, Field, Modal } from '../ui';
 import NoteCard from './NoteCard';
-import { NOTE_TYPES, REJECT_REASONS, groupByLevel } from '../../utils/handover';
+import { NOTE_TYPES, REJECT_REASONS, groupByLevel, isAllLevels, levelLabel } from '../../utils/handover';
 
 /**
  * The reviewer's queue: notes awaiting review, grouped by level. Each note can
@@ -30,7 +30,7 @@ export default function ReviewTab({ notes, levels, isAr, onReview, onEdit }) {
       {groups.map(({ level, notes: list }) => (
         <section key={level} className="ho-level-group" aria-labelledby={`ho-rv-${level}`}>
           <h2 className="ho-level-title" id={`ho-rv-${level}`}>
-            <span dir="ltr">{level}</span>
+            <span dir={isAllLevels(level) ? undefined : 'ltr'}>{levelLabel(level, isAr)}</span>
             <span className="badge badge--info num">{list.length}</span>
           </h2>
           <div className="ho-grid">
@@ -163,7 +163,7 @@ function RejectDialog({ target, isAr, onClose, onConfirm }) {
       open={Boolean(target)}
       onClose={busy ? undefined : close}
       title={isAr ? 'استبعاد الملاحظة' : 'Reject note'}
-      description={target ? `${target.note.level} - ${target.note.description.slice(0, 80)}` : ''}
+      description={target ? `${levelLabel(target.note.level, isAr)} - ${target.note.description.slice(0, 80)}` : ''}
       closeLabel={isAr ? 'إغلاق' : 'Close'}
       footer={(
         <>

@@ -2373,3 +2373,12 @@ button.ho-photo:focus-visible {
   padding-block-start: var(--space-4);
   border-block-start: 1px solid var(--border);
 }
+
+/* A note that covers every level. */
+.ho-level--all {
+  font-family: var(--font);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-soft-fg);
+}

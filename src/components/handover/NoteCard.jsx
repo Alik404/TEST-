@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Hourglass, CircleCheck, Clock, Ban, MapPin, User, ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
 import { Modal } from '../ui';
-import { STATUSES, noteType, noteText, rejectReason, dmy } from '../../utils/handover';
+import { STATUSES, noteType, noteText, rejectReason, dmy, isAllLevels, levelLabel } from '../../utils/handover';
 
 const STATUS_ICON = { pending: Hourglass, approved: CircleCheck, deferred: Clock, rejected: Ban };
 
@@ -87,10 +87,12 @@ export default function NoteCard({ note, isAr, actions, showOriginal = false, ch
   const edited = showOriginal && note.final_text && note.final_text.trim() !== note.description.trim();
 
   return (
-    <article className="card ho-card" aria-label={`${note.number || note.level} - ${isAr ? type.ar : type.en}`}>
+    <article className="card ho-card" aria-label={`${note.number || levelLabel(note.level, isAr)} - ${isAr ? type.ar : type.en}`}>
       <div className="ho-card-head">
         <NumberBadge number={note.number} />
-        <span className="ho-level" dir="ltr">{note.level}</span>
+        {isAllLevels(note.level)
+          ? <span className="ho-level ho-level--all">{levelLabel(note.level, isAr)}</span>
+          : <span className="ho-level" dir="ltr">{note.level}</span>}
         <span className="ho-type">{isAr ? type.ar : type.en}</span>
         <span className="ho-date num" dir="ltr">{dmy(note.created_at)}</span>
         <span className="ho-card-status"><StatusBadge status={note.status} isAr={isAr} /></span>

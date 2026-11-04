@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from 'react';
 import { CircleCheck, CircleAlert, CircleDashed, Pencil, Save, ClipboardCheck } from 'lucide-react';
 import { StatCard, Chips, Modal, Field, EmptyState } from '../ui';
-import { RECEIPT_STATUSES, receiptStatus } from '../../utils/handover';
+import { RECEIPT_STATUSES, receiptStatus, isAllLevels } from '../../utils/handover';
 import { isoDay, isoToDmy } from '../../utils/format';
 
 const STATUS_ICON = { not_received: CircleDashed, with_notes: CircleAlert, received: CircleCheck };
@@ -29,21 +29,27 @@ export default function ReceiptsTab({ levels, notes, receipts, isAr, canEdit, on
 
   const byLevel = useMemo(() => new Map(receipts.map(r => [r.level, r])), [receipts]);
 
+  // A note covering all levels counts on every level.
   const noteCounts = useMemo(() => {
     const map = new Map();
+    const general = { approved: 0, deferred: 0, pending: 0 };
     for (const n of notes) {
-      const c = map.get(n.level) || { approved: 0, deferred: 0, pending: 0 };
+      const c = isAllLevels(n.level) ? general : (map.get(n.level) || { approved: 0, deferred: 0, pending: 0 });
       if (c[n.status] !== undefined) c[n.status] += 1;
-      map.set(n.level, c);
+      if (!isAllLevels(n.level)) map.set(n.level, c);
     }
-    return map;
+    return { map, general };
   }, [notes]);
 
-  const rows = levels.map(level => ({
-    level,
-    receipt: byLevel.get(level) || { level, status: 'not_received', received_on: null, notes: '' },
-    counts: noteCounts.get(level) || { approved: 0, deferred: 0, pending: 0 },
-  }));
+  const rows = levels.map(level => {
+    const own = noteCounts.map.get(level) || { approved: 0, deferred: 0, pending: 0 };
+    const g = noteCounts.general;
+    return {
+      level,
+      receipt: byLevel.get(level) || { level, status: 'not_received', received_on: null, notes: '' },
+      counts: { approved: own.approved + g.approved, deferred: own.deferred + g.deferred, pending: own.pending + g.pending },
+    };
+  });
 
   const totals = rows.reduce((acc, r) => {
     acc[r.receipt.status] = (acc[r.receipt.status] || 0) + 1;
