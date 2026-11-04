@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Images, Share2, Download, Wand2, TriangleAlert, ImageOff } from 'lucide-react';
 import { EmptyState, Modal, ProgressBar } from '../ui';
 import { toast } from '../../utils/toast';
-import { noteType, noteText, dmy, sortNotes, exportFileName } from '../../utils/handover';
+import { noteType, noteText, dmy, sortNotes, exportFileName, isAllLevels, levelLabel } from '../../utils/handover';
 import {
   ensureExportFonts, loadPhoto, renderNoteImage, renderLevelCover, canShareFiles, shareFiles, downloadFiles, SHARE_BATCH,
 } from '../../utils/handoverImages';
@@ -82,8 +82,9 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
   }, [notes, includeDeferred]);
 
   const levelOptions = useMemo(() => [
+    ...[...levelCounts.keys()].filter(isAllLevels),
     ...levels.filter(l => levelCounts.has(l)),
-    ...[...levelCounts.keys()].filter(l => !levels.includes(l)).sort(),
+    ...[...levelCounts.keys()].filter(l => !levels.includes(l) && !isAllLevels(l)).sort(),
   ], [levels, levelCounts]);
 
   const pickNotes = (list) => sortNotes(list.filter(n => exportable(n, includeDeferred) && !excluded.has(n.level)), levels);
@@ -129,7 +130,7 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
           const name = coverFileName(level);
           try {
             const blob = await renderLevelCover({
-              level,
+              level: levelLabel(level, true),
               noteCount: levelNotes.length,
               imageCount: levelNotes.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0),
               date: dmy(new Date().toISOString()),
@@ -147,7 +148,7 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
         for (const note of levelNotes) {
           const base = {
             number: note.number,
-            level: note.level,
+            level: levelLabel(note.level, true),
             typeLabel: noteType(note.note_type).ar,
             date: dmy(note.created_at),
             text: noteText(note),
@@ -229,7 +230,7 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
       await save(batches.flat());
       return;
     }
-    const where = key === ALL ? '' : (isAr ? ` للنزلة ${key}` : ` for ${key}`);
+    const where = key === ALL ? '' : isAllLevels(key) ? (isAr ? ' لكل النزلات' : ' for all levels') : (isAr ? ` للنزلة ${key}` : ` for ${key}`);
     try {
       await shareFiles(files);
       if (index + 1 < batches.length) {
@@ -285,7 +286,7 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
           <div className="chips chips--wrap" role="group" aria-label={isAr ? 'النزلات' : 'Levels'}>
             {levelOptions.map(level => (
               <button key={level} type="button" className="chip" aria-pressed={!excluded.has(level)} onClick={() => toggleLevel(level)} disabled={busy}>
-                <span dir="ltr">{level}</span>
+                <span dir={isAllLevels(level) ? undefined : 'ltr'}>{levelLabel(level, isAr)}</span>
                 <span className="chip-count num">{levelCounts.get(level)}</span>
               </button>
             ))}
@@ -372,7 +373,9 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
                 <section key={group.level} className="ho-export-level" aria-labelledby={`ho-lv-${group.level}`}>
                   <header className="ho-export-level-head">
                     <h3 id={`ho-lv-${group.level}`}>
-                      {isAr ? 'النزلة' : 'Level'} <span dir="ltr" className="num">{group.level}</span>
+                      {isAllLevels(group.level)
+                        ? levelLabel(group.level, isAr)
+                        : <>{isAr ? 'النزلة' : 'Level'} <span dir="ltr" className="num">{group.level}</span></>}
                       <span className="chip-count num">{picked.length}/{group.items.length}</span>
                     </h3>
                     <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAllSelected(!allPicked, group.level)} disabled={busy}>
@@ -397,11 +400,11 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
                   <div className="ho-export-actions">
                     <button type="button" className="btn btn--primary" onClick={() => share(group.level)} disabled={picked.length === 0 || busy}>
                       <Share2 size={18} aria-hidden="true" />
-                      {shareLabel(group.level, isAr ? `مشاركة ${group.level}` : `Share ${group.level}`)}
+                      {shareLabel(group.level, isAr ? `مشاركة ${levelLabel(group.level, isAr)}` : `Share ${levelLabel(group.level, isAr)}`)}
                     </button>
                     <button type="button" className="btn btn--secondary" onClick={() => save(picked)} disabled={picked.length === 0 || busy}>
                       <Download size={18} aria-hidden="true" />
-                      {isAr ? `حفظ ${group.level}` : `Save ${group.level}`}
+                      {isAr ? `حفظ ${levelLabel(group.level, isAr)}` : `Save ${levelLabel(group.level, isAr)}`}
                     </button>
                   </div>
                 </section>

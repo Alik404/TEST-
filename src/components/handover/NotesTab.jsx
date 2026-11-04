@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pencil, Trash2, Undo2, SearchX, Inbox } from 'lucide-react';
 import { EmptyState, Field, Chips } from '../ui';
 import NoteCard from './NoteCard';
-import { STATUSES, sortNotes, canEditNote } from '../../utils/handover';
+import { STATUSES, sortNotes, canEditNote, ALL_LEVELS, isAllLevels, appliesToLevel } from '../../utils/handover';
 
 /** Every note with filters; owners edit or delete while pending, the reviewer can send any note back. */
 export default function NotesTab({ notes, levels, user, permissions, isAr, onEdit, onDelete, onReturn }) {
@@ -11,7 +11,7 @@ export default function NotesTab({ notes, levels, user, permissions, isAr, onEdi
   const [mine, setMine] = useState(false);
 
   const scoped = useMemo(() => notes.filter(n =>
-    (!level || n.level === level) && (!mine || Number(n.created_by) === Number(user.id))), [notes, level, mine, user.id]);
+    (!level || (isAllLevels(level) ? isAllLevels(n.level) : appliesToLevel(n, level))) && (!mine || Number(n.created_by) === Number(user.id))), [notes, level, mine, user.id]);
 
   const counts = useMemo(() => scoped.reduce((acc, n) => {
     acc[n.status] = (acc[n.status] || 0) + 1;
@@ -22,7 +22,11 @@ export default function NotesTab({ notes, levels, user, permissions, isAr, onEdi
 
   const levelOptions = useMemo(() => {
     const used = new Set(notes.map(n => n.level));
-    return [...levels.filter(l => used.has(l)), ...[...used].filter(l => !levels.includes(l)).sort()];
+    return [
+      ...(used.has(ALL_LEVELS) ? [ALL_LEVELS] : []),
+      ...levels.filter(l => used.has(l)),
+      ...[...used].filter(l => !levels.includes(l) && !isAllLevels(l)).sort(),
+    ];
   }, [notes, levels]);
 
   const statusOptions = [
@@ -38,7 +42,7 @@ export default function NotesTab({ notes, levels, user, permissions, isAr, onEdi
             <Field label={isAr ? 'النزلة' : 'Level'} htmlFor="ho-notes-level">
               <select id="ho-notes-level" className="select" value={level} onChange={(e) => setLevel(e.target.value)}>
                 <option value="">{isAr ? 'كل النزلات' : 'All levels'}</option>
-                {levelOptions.map(l => <option key={l} value={l} dir="ltr">{l}</option>)}
+                {levelOptions.map(l => <option key={l} value={l} dir={isAllLevels(l) ? undefined : 'ltr'}>{isAllLevels(l) ? (isAr ? 'العامة فقط (كل النزلات)' : 'General only (all levels)') : l}</option>)}
               </select>
             </Field>
             <div className="chips chips--wrap ho-mine" role="group" aria-label={isAr ? 'صاحب الملاحظة' : 'Author'}>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PencilLine, ListChecks, ListFilter, Images, ClipboardCheck, Settings, TriangleAlert, Database, RotateCcw } from 'lucide-react';
 import { LoadingBlock, Modal, ConfirmDialog, EmptyState } from '../ui';
 import { toast } from '../../utils/toast';
-import { handoverRequest, readPref, writePref } from '../../utils/handover';
+import { handoverRequest, readPref, writePref, levelLabel } from '../../utils/handover';
 import NoteForm from './NoteForm';
 import NotesTab from './NotesTab';
 import ReviewTab from './ReviewTab';
@@ -79,7 +79,7 @@ export default function HandoverNotes({ user, lang }) {
     try {
       const note = await handoverRequest('/notes', { method: 'POST', body: JSON.stringify(payload) });
       upsert(note);
-      toast.success(isAr ? `حُفظت الملاحظة على ${note.level}، وهي بانتظار الفلترة.` : `Saved on ${note.level}, awaiting review.`);
+      toast.success(isAr ? `حُفظت الملاحظة على ${levelLabel(note.level, isAr)}، وهي بانتظار الفلترة.` : `Saved on ${levelLabel(note.level, isAr)}, awaiting review.`);
       return true;
     } catch (err) {
       toast.error(err.message);

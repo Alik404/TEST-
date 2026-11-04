@@ -22,6 +22,10 @@ const REJECT_REASONS = new Set(['duplicate', 'inaccurate', 'out_of_scope', 'reso
 const RECEIPT_STATUSES = new Set(['not_received', 'with_notes', 'received']);
 const DEFAULT_LEVELS = Array.from({ length: 37 }, (_, i) => `B${37 - i}`);
 const LEVEL_RE = /^[A-Z0-9][A-Z0-9-]{0,11}$/;
+// Reserved level code for a single note that covers every level. It is not in
+// the levels list, numbers its notes in its own series (ALL-01, ALL-D01) and
+// cannot be added as a real level.
+const ALL_LEVELS = 'ALL';
 const PHOTO_PATH_RE = /^notes\/[0-9a-f-]{36}\/[0-9a-f-]{36}(_t)?\.jpg$/;
 
 const MAX_PHOTOS = 4;
@@ -377,7 +381,7 @@ export const registerHandoverRoutes = (app) => {
     const noteType = String(req.body?.note_type || '');
     const description = cleanText(req.body?.description, 2000);
     const location = cleanText(req.body?.location, 200);
-    if (!settings.levels.includes(level)) throw new HttpError(400, 'اختر النزلة من القائمة.');
+    if (!settings.levels.includes(level) && level !== ALL_LEVELS) throw new HttpError(400, 'اختر النزلة من القائمة.');
     if (!NOTE_TYPES.has(noteType)) throw new HttpError(400, 'اختر نوع الملاحظة.');
     if (!description) throw new HttpError(400, 'اكتب وصف الملاحظة.');
 
@@ -428,7 +432,7 @@ export const registerHandoverRoutes = (app) => {
     const noteType = String(req.body?.note_type || '');
     const description = cleanText(req.body?.description, 2000);
     const location = cleanText(req.body?.location, 200);
-    if (!settings.levels.includes(level) && level !== note.level) throw new HttpError(400, 'اختر النزلة من القائمة.');
+    if (!settings.levels.includes(level) && level !== ALL_LEVELS && level !== note.level) throw new HttpError(400, 'اختر النزلة من القائمة.');
     if (!NOTE_TYPES.has(noteType)) throw new HttpError(400, 'اختر نوع الملاحظة.');
     if (!description) throw new HttpError(400, 'اكتب وصف الملاحظة.');
 
@@ -537,6 +541,7 @@ export const registerHandoverRoutes = (app) => {
       const levels = [...new Set(body.levels.map(cleanLevel))];
       const bad = levels.find(l => !LEVEL_RE.test(l));
       if (bad !== undefined) throw new HttpError(400, `اسم النزلة "${bad}" غير مقبول. استخدم حروفاً لاتينية وأرقاماً فقط، مثل B38.`);
+      if (levels.includes(ALL_LEVELS)) throw new HttpError(400, `الاسم "${ALL_LEVELS}" محجوز للملاحظات التي تشمل كل النزلات. اختر اسماً آخر.`);
       if (levels.length === 0 || levels.length > 300) throw new HttpError(400, 'القائمة يجب أن تحتوي نزلة واحدة على الأقل.');
       await store().writeSetting('levels', levels);
     }

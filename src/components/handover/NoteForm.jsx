@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Camera, ImagePlus, X, Save, Loader2 } from 'lucide-react';
 import { Field } from '../ui';
 import { toast } from '../../utils/toast';
-import { NOTE_TYPES, MAX_PHOTOS, readPref, writePref } from '../../utils/handover';
+import { NOTE_TYPES, MAX_PHOTOS, ALL_LEVELS, isAllLevels, levelLabel, readPref, writePref } from '../../utils/handover';
 import { preparePhoto, blobToDataUrl } from '../../utils/handoverImages';
 
 const LEVEL_KEY = 'handover_level';
@@ -24,7 +24,7 @@ export default function NoteForm({ levels, isAr, note = null, onSubmit, submitLa
   const editing = Boolean(note);
   const [level, setLevel] = useState(() => {
     const saved = note?.level || readPref(LEVEL_KEY);
-    return levels.includes(saved) || editing ? saved : levels[0] || '';
+    return levels.includes(saved) || isAllLevels(saved) || editing ? saved : levels[0] || '';
   });
   const [type, setType] = useState(() => note?.note_type || readPref(TYPE_KEY, ''));
   const [description, setDescription] = useState(note?.description || '');
@@ -44,7 +44,8 @@ export default function NoteForm({ levels, isAr, note = null, onSubmit, submitLa
     photosRef.current.forEach(p => p.kind === 'new' && URL.revokeObjectURL(p.preview));
   }, []);
 
-  const levelOptions = levels.includes(level) || !level ? levels : [level, ...levels];
+  const levelOptions = levels.includes(level) || !level || isAllLevels(level) ? levels : [level, ...levels];
+  const allLevels = isAllLevels(level);
   const slots = MAX_PHOTOS - photos.length - processing;
 
   const addFiles = async (fileList) => {
@@ -123,7 +124,12 @@ export default function NoteForm({ levels, isAr, note = null, onSubmit, submitLa
 
   return (
     <form className="stack ho-form" onSubmit={submit} noValidate aria-busy={saving}>
-      <Field label={isAr ? 'النزلة' : 'Level'} htmlFor={`${uid}-level`} error={errors.level}>
+      <Field
+        label={isAr ? 'النزلة' : 'Level'}
+        htmlFor={`${uid}-level`}
+        error={errors.level}
+        hint={allLevels ? (isAr ? 'ملاحظة واحدة تشمل كل النزلات، وتُرقّم بسلسلة خاصة (ALL-01).' : 'One note for every level, numbered in its own series (ALL-01).') : undefined}
+      >
         <select
           id={`${uid}-level`}
           className="select ho-select-lg"
@@ -132,6 +138,7 @@ export default function NoteForm({ levels, isAr, note = null, onSubmit, submitLa
           aria-invalid={Boolean(errors.level)}
         >
           {!level && <option value="">{isAr ? 'اختر النزلة' : 'Choose'}</option>}
+          <option value={ALL_LEVELS}>{levelLabel(ALL_LEVELS, isAr)}</option>
           {levelOptions.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
       </Field>
@@ -169,7 +176,7 @@ export default function NoteForm({ levels, isAr, note = null, onSubmit, submitLa
         />
       </Field>
 
-      <Field label={isAr ? 'الموقع داخل النزلة (اختياري)' : 'Place in the level (optional)'} htmlFor={`${uid}-loc`}>
+      <Field label={allLevels ? (isAr ? 'الموقع (اختياري)' : 'Place (optional)') : (isAr ? 'الموقع داخل النزلة (اختياري)' : 'Place in the level (optional)')} htmlFor={`${uid}-loc`}>
         <input
           id={`${uid}-loc`}
           className="input"

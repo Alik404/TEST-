@@ -74,10 +74,25 @@ export const dmy = (value) => {
 /** The text that goes out: the reviewer's wording when there is one. */
 export const noteText = (note) => (note.final_text || note.description || '').trim();
 
-/** Levels in the order of the settings list; unknown levels go last, A to Z. */
+/**
+ * Reserved level code for one note that covers every level. Same code as the
+ * server; it is never part of the levels list.
+ */
+export const ALL_LEVELS = 'ALL';
+
+export const isAllLevels = (level) => level === ALL_LEVELS;
+
+/** What to show for a level: the code itself, or "all levels" in words. */
+export const levelLabel = (level, isAr = true) =>
+  (isAllLevels(level) ? (isAr ? 'كل النزلات' : 'All levels') : level);
+
+/** Notes that concern a level: its own notes plus those covering all levels. */
+export const appliesToLevel = (note, level) => note.level === level || isAllLevels(note.level);
+
+/** Levels in the order of the settings list; "all levels" first, unknown levels last, A to Z. */
 export const levelRank = (levels) => {
   const index = new Map(levels.map((l, i) => [l, i]));
-  return (level) => (index.has(level) ? index.get(level) : levels.length);
+  return (level) => (isAllLevels(level) ? -1 : index.has(level) ? index.get(level) : levels.length);
 };
 
 const STATUS_ORDER = { pending: 0, approved: 1, deferred: 2, rejected: 3 };
