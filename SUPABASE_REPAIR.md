@@ -21,7 +21,8 @@ Run `npm run cloud:maintain -- --apply` after the migration. It:
   A concurrent session-version change prevents overwriting that account. Converted accounts sign in again.
 - Uploads available legacy daily attachments, downloads and compares their SHA-256 digest,
   then updates all references to that file. It never deletes local files or clears missing references.
-- Lists missing filenames without printing credentials. To recover from another disk, pass `--uploads DIRECTORY`.
+- Checks media headers and retains references to malformed files instead of uploading them.
+- Lists missing or malformed filenames without printing credentials. To recover from another disk, pass `--uploads DIRECTORY`.
 
 Keep `.private-backups/` and its keys private and outside source control. Recovery snapshot files contain
 `12-byte IV | 16-byte GCM tag | ciphertext`; the key file is hexadecimal, and the decrypted payload is gzip JSON.

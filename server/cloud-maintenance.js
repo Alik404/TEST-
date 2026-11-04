@@ -16,6 +16,20 @@ const mimeFor = (name, kind) => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: '
   '3gp': 'video/3gpp', mp3: 'audio/mpeg', m4a: 'audio/mp4', ogg: 'audio/ogg', wav: 'audio/wav',
 })[name.split('.').at(-1)];
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const hasMediaHeader = (bytes, filename) => {
+  const extension = filename.split('.').at(-1);
+  const starts = values => bytes.subarray(0, values.length).equals(Buffer.from(values));
+  if (extension === 'webm') return starts([0x1a, 0x45, 0xdf, 0xa3]);
+  if (extension === 'jpg' || extension === 'jpeg') return starts([0xff, 0xd8, 0xff]);
+  if (extension === 'png') return starts([137,80,78,71,13,10,26,10]);
+  if (extension === 'gif') return /^GIF8[79]a$/.test(bytes.subarray(0,6).toString('ascii'));
+  if (extension === 'webp') return bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WEBP';
+  if (['mp4','mov','m4a','3gp','heic','heif'].includes(extension)) return /^(ftyp|moov|mdat|wide)$/.test(bytes.subarray(4,8).toString());
+  if (extension === 'ogg') return bytes.subarray(0,4).toString() === 'OggS';
+  if (extension === 'wav') return bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WAVE';
+  if (extension === 'mp3') return bytes.subarray(0,3).toString() === 'ID3' || (bytes[0] === 255 && (bytes[1] & 224) === 224);
+  return false;
+};
 
 export async function upgradeLegacyPasswords(client) {
   const accounts = await cloudResult(client.from('users').select('id,password,session_version'));
@@ -39,7 +53,7 @@ export async function upgradeLegacyPasswords(client) {
 export async function migrateLegacyAttachments(client, uploadsDirectory) {
   const rows = await cloudResult(client.from('daily_updates').select('id,media_url,media_type').like('media_url', '/api/uploads/%'));
   const urls = new Map(rows.filter(row => row.media_url?.startsWith('/api/uploads/')).map(row => [row.media_url, row]));
-  const result = { migratedFiles: 0, migratedReferences: 0, missingFiles: [] };
+  const result = { migratedFiles: 0, migratedReferences: 0, missingFiles: [], invalidFiles: [] };
   const root = path.resolve(uploadsDirectory);
   for (const [url, row] of urls) {
     const filename = url.slice('/api/uploads/'.length);
@@ -55,6 +69,7 @@ export async function migrateLegacyAttachments(client, uploadsDirectory) {
       result.missingFiles.push(filename); continue;
     }
     if (!bytes.length || bytes.length > 12 * 1024 * 1024) throw new Error('Invalid legacy attachment size.');
+    if (!hasMediaHeader(bytes, filename)) { result.invalidFiles.push(filename); continue; }
     const storage = client.storage.from('daily-attachments');
     const uploaded = await storage.upload(filename, bytes, { contentType: mimeFor(filename, row.media_type), upsert: false });
     if (uploaded.error && !['409','Duplicate'].includes(String(uploaded.error.statusCode || uploaded.error.error))

@@ -54,16 +54,19 @@ test('legacy attachment migration verifies bytes, moves duplicate references, an
   const cloud = await fakeCloud(t);
   cloud.tables.daily_updates = [{ id: 1, media_url: '/api/uploads/present.webm', media_type: 'audio' },
     { id: 2, media_url: '/api/uploads/present.webm', media_type: 'audio' },
-    { id: 3, media_url: '/api/uploads/missing.jpg', media_type: 'image' }];
+    { id: 3, media_url: '/api/uploads/missing.jpg', media_type: 'image' },
+    { id: 4, media_url: '/api/uploads/broken.webm', media_type: 'audio' }];
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'legacy-media-test-'));
-  await fs.writeFile(path.join(directory, 'present.webm'), Buffer.from('verified legacy media'));
+  await fs.writeFile(path.join(directory, 'present.webm'), Buffer.concat([Buffer.from([0x1a,0x45,0xdf,0xa3]), Buffer.from('verified legacy media')]));
+  await fs.writeFile(path.join(directory, 'broken.webm'), Buffer.from('not valid media'));
   const client = createClient(cloud.url, 'test-key');
   assert.deepEqual(await migrateLegacyAttachments(client, directory), {
-    migratedFiles: 1, migratedReferences: 2, missingFiles: ['missing.jpg'],
+    migratedFiles: 1, migratedReferences: 2, missingFiles: ['missing.jpg'], invalidFiles: ['broken.webm'],
   });
   assert.equal(cloud.tables.daily_updates[0].media_url, 'storage:daily-attachments/present.webm');
   assert.equal(cloud.tables.daily_updates[1].media_url, 'storage:daily-attachments/present.webm');
   assert.equal(cloud.tables.daily_updates[2].media_url, '/api/uploads/missing.jpg');
+  assert.equal(cloud.tables.daily_updates[3].media_url, '/api/uploads/broken.webm');
   assert.equal((await migrateLegacyAttachments(client, directory)).migratedFiles, 0);
   assert.ok(safeBackupPath('uploads/camera.heic'));
   assert.ok(safeBackupPath('uploads/camera.heif'));
@@ -73,7 +76,7 @@ test('a failed attachment verification never updates the legacy database referen
   const cloud = await fakeCloud(t);
   cloud.tables.daily_updates = [{ id: 1, media_url: '/api/uploads/photo.jpg', media_type: 'image' }];
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'legacy-failure-test-'));
-  await fs.writeFile(path.join(directory, 'photo.jpg'), Buffer.from('legacy photo'));
+  await fs.writeFile(path.join(directory, 'photo.jpg'), Buffer.concat([Buffer.from([255,216,255]), Buffer.from('legacy photo')]));
   cloud.fail(request => request.method === 'GET' && request.path.startsWith('/storage/'));
   await assert.rejects(migrateLegacyAttachments(createClient(cloud.url, 'test-key'), directory));
   assert.equal(cloud.tables.daily_updates[0].media_url, '/api/uploads/photo.jpg');
