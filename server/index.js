@@ -93,7 +93,7 @@ app.get('/api/health', (req, res) => {
 
 // ── 1. Authentication Endpoint ──────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, remember } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبة.' });
@@ -164,7 +164,7 @@ app.post('/api/login', async (req, res) => {
       role: record.role
     };
 
-    res.json({ user, token: issueToken(user) });
+    res.json({ user, token: issueToken(user, { remember: remember === true }) });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'حدث خطأ في الخادم أثناء تسجيل الدخول.' });

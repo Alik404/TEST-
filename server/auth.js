@@ -72,6 +72,7 @@ export const verifyPassword = (plain, stored) =>
 
 // ── Signed Session Tokens (HMAC-SHA256, stateless) ──────────────────────────
 const TOKEN_TTL_SECONDS = 60 * 60 * 12; // 12 hours
+const REMEMBER_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days, when "remember me" is ticked
 
 const resolveSecret = () => {
   const fromEnv = process.env.AUTH_SECRET;
@@ -109,12 +110,13 @@ const sign = (payloadB64) =>
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
-export const issueToken = (user) => {
+export const issueToken = (user, { remember = false } = {}) => {
+  const ttl = remember ? REMEMBER_TTL_SECONDS : TOKEN_TTL_SECONDS;
   const payload = {
     sub: user.id,
     name: user.name,
     role: user.role,
-    exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
+    exp: Math.floor(Date.now() / 1000) + ttl
   };
   const payloadB64 = b64url(JSON.stringify(payload));
   return payloadB64 + '.' + sign(payloadB64);

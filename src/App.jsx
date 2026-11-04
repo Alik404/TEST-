@@ -188,8 +188,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const handleLoginSuccess = (loggedInUser, token) => {
-    setSession(loggedInUser, token);
+  const handleLoginSuccess = (loggedInUser, token, remember) => {
+    setSession(loggedInUser, token, remember);
     setUser(loggedInUser);
     toast.success(isAr ? `مرحباً بك، ${loggedInUser.name}` : `Welcome, ${loggedInUser.name}`);
   };

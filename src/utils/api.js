@@ -8,39 +8,76 @@
 
 const TOKEN_KEY = 'project_token';
 const USER_KEY = 'project_user';
+const EMAIL_KEY = 'project_last_email';
 
-export const getToken = () => {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+/**
+ * "Remember me" keeps the session in localStorage, so it survives closing the
+ * browser and restarting the device. Without it the session goes to
+ * sessionStorage and ends when the browser is closed.
+ */
+const stores = () => {
+  const list = [];
+  try { list.push(window.localStorage); } catch { /* unavailable */ }
+  try { list.push(window.sessionStorage); } catch { /* unavailable */ }
+  return list;
 };
 
-export const setSession = (user, token) => {
+const readItem = (key) => {
+  for (const store of stores()) {
+    try {
+      const value = store.getItem(key);
+      if (value) return value;
+    } catch {
+      // Try the next store.
+    }
+  }
+  return null;
+};
+
+export const getToken = () => readItem(TOKEN_KEY);
+
+export const setSession = (user, token, remember = false) => {
+  clearSession();
   try {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-    localStorage.setItem(TOKEN_KEY, token);
+    const store = remember ? window.localStorage : window.sessionStorage;
+    store.setItem(USER_KEY, JSON.stringify(user));
+    store.setItem(TOKEN_KEY, token);
   } catch {
-    // Storage unavailable (private mode). The session lives for this tab only.
+    // Storage unavailable (private mode). The session lives in memory only.
   }
 };
 
 export const clearSession = () => {
-  try {
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // Nothing to clear.
+  for (const store of stores()) {
+    try {
+      store.removeItem(USER_KEY);
+      store.removeItem(TOKEN_KEY);
+    } catch {
+      // Nothing to clear.
+    }
   }
 };
 
 export const getStoredUser = () => {
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = readItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
+  }
+};
+
+/** The email of the last "remember me" sign-in, to prefill the form. */
+export const getRememberedEmail = () => {
+  try { return localStorage.getItem(EMAIL_KEY) || ''; } catch { return ''; }
+};
+
+export const setRememberedEmail = (email) => {
+  try {
+    if (email) localStorage.setItem(EMAIL_KEY, email);
+    else localStorage.removeItem(EMAIL_KEY);
+  } catch {
+    // Storage unavailable.
   }
 };
 

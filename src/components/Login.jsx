@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Eye, EyeOff, Sun, Moon, Languages, AlertCircle, LogIn } from 'lucide-react';
 import companyLogo from '../assets/company-logo.webp';
 import { ORG } from '../config/org';
+import { getRememberedEmail, setRememberedEmail } from '../utils/api';
 
 export default function Login({ onLoginSuccess, t, lang, setLang, theme, setTheme }) {
   const isAr = lang === 'ar';
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(getRememberedEmail);
+  const [remember, setRemember] = useState(() => getRememberedEmail() !== '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -23,11 +25,12 @@ export default function Login({ onLoginSuccess, t, lang, setLang, theme, setThem
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.token) {
-        onLoginSuccess(data.user, data.token);
+        setRememberedEmail(remember ? email.trim() : '');
+        onLoginSuccess(data.user, data.token, remember);
       } else {
         setError(isAr
           ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة. تحقق منهما وأعد المحاولة.'
@@ -107,6 +110,18 @@ export default function Login({ onLoginSuccess, t, lang, setLang, theme, setThem
               </button>
             </div>
           </div>
+
+          <label className="auth-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>
+              {isAr ? 'تذكرني' : 'Remember me'}
+              <small>{isAr ? 'ابقَ مسجلاً لمدة 30 يوماً على هذا الجهاز' : 'Stay signed in for 30 days on this device'}</small>
+            </span>
+          </label>
 
           <button type="submit" className="btn btn--primary btn--block auth-submit" aria-busy={loading}>
             <LogIn size={18} aria-hidden="true" style={{ transform: isAr ? 'scaleX(-1)' : undefined }} />
