@@ -1,11 +1,5 @@
-import { initDatabase, dbRun, dbGet } from './database.js';
+import { initDatabase, dbRun } from './database.js';
 import { hashPassword } from './auth.js';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const seedData = async () => {
   try {

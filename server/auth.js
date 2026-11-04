@@ -1,4 +1,6 @@
+import './config.js';
 import crypto from 'crypto';
+import { identifyActor } from './audit-context.js';
 
 // ── Password Hashing (scrypt, Node built-in — no extra dependency) ──────────
 const SCRYPT_N = 16384;
@@ -110,12 +112,23 @@ const sign = (payloadB64) =>
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
+export const USER_ROLES = new Set(['super_admin', 'admin', 'viewer']);
+export const publicUser = ({ id, email, name, role }) => ({ id, email, name, role });
+const credentialStamp = (user) => sign(JSON.stringify([String(user.id), user.email, user.role, user.password]));
+let findAccount = async () => { throw new Error('Account lookup is not configured.'); };
+export const setAccountLookup = (lookup) => { findAccount = lookup; };
+
 export const issueToken = (user, { remember = false } = {}) => {
   const ttl = remember ? REMEMBER_TTL_SECONDS : TOKEN_TTL_SECONDS;
+  if (!user.session_version || !user.password || !USER_ROLES.has(user.role)) {
+    throw new Error('Cannot issue a session without a current account version.');
+  }
   const payload = {
     sub: user.id,
     name: user.name,
     role: user.role,
+    ver: user.session_version,
+    stamp: credentialStamp(user),
     exp: Math.floor(Date.now() / 1000) + ttl
   };
   const payloadB64 = b64url(JSON.stringify(payload));
@@ -143,8 +156,8 @@ export const verifyToken = (token) => {
     return null;
   }
 
-  if (!payload || typeof payload.exp !== 'number') return null;
-  if (payload.exp < Math.floor(Date.now() / 1000)) return null;
+  if (!payload || !Number.isFinite(payload.exp) || !payload.sub || !payload.ver || !payload.stamp) return null;
+  if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
 
   return payload;
 };
@@ -156,26 +169,40 @@ const readToken = (req) => {
   return null;
 };
 
-export const requireAuth = (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   const payload = verifyToken(readToken(req));
   if (!payload) {
     return res.status(401).json({ error: 'جلسة غير صالحة أو منتهية. يرجى تسجيل الدخول من جديد.' });
   }
-  req.user = { id: payload.sub, name: payload.name, role: payload.role };
-  next();
+  try {
+    // Never authorize from an offline copy when cloud storage is configured.
+    const account = await findAccount(payload.sub);
+    if (account && !account.session_version) {
+      return res.status(503).json({ error: 'طبّق ملف supabase_urgent_fixes.sql لتحديث الجلسات.', code: 'SCHEMA_REQUIRED' });
+    }
+    if (!account || !USER_ROLES.has(account.role) || account.session_version !== payload.ver
+      || !constantTimeEquals(payload.stamp, credentialStamp(account))) {
+      return res.status(401).json({ error: 'تغيّر الحساب أو انتهت الجلسة. يرجى تسجيل الدخول من جديد.' });
+    }
+    req.user = publicUser(account);
+    identifyActor(req.user);
+    next();
+  } catch (error) {
+    console.error('Session verification unavailable:', error.message);
+    res.status(error.status || 503).json({
+      error: error.code === 'SCHEMA_REQUIRED' ? error.message : 'تعذّر التحقق من الجلسة. أعد المحاولة عند عودة الاتصال.',
+      code: error.code || 'AUTH_UNAVAILABLE',
+    });
+  }
 };
 
-export const requireRole = (...allowedRoles) => (req, res, next) => {
-  const payload = verifyToken(readToken(req));
-  if (!payload) {
-    return res.status(401).json({ error: 'جلسة غير صالحة أو منتهية. يرجى تسجيل الدخول من جديد.' });
-  }
-  if (!allowedRoles.includes(payload.role)) {
-    return res.status(403).json({ error: 'لا تملك صلاحية تنفيذ هذا الإجراء.' });
-  }
-  req.user = { id: payload.sub, name: payload.name, role: payload.role };
-  next();
-};
+export const requireRole = (...allowedRoles) => (req, res, next) =>
+  requireAuth(req, res, () => {
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'لا تملك صلاحية تنفيذ هذا الإجراء.' });
+    }
+    next();
+  });
 
 /** Site engineers and the general director may edit project data. */
 export const requireEditor = requireRole('admin', 'super_admin');

@@ -36,6 +36,7 @@ export default function DailyUpdates({ user, lang }) {
 
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const sendingRef = useRef(false);
   const imageRef = useRef(null);
   const videoRef = useRef(null);
 
@@ -194,7 +195,8 @@ export default function DailyUpdates({ user, lang }) {
 
   const send = async (e) => {
     e?.preventDefault();
-    if (!text.trim() && !attachment) return;
+    if (sendingRef.current || (!text.trim() && !attachment)) return;
+    sendingRef.current = true;
     setSending(true);
     try {
       // Sender identity is taken from the session on the server.
@@ -207,10 +209,11 @@ export default function DailyUpdates({ user, lang }) {
       if (inputRef.current) inputRef.current.style.height = '';
       setReplyTo(null);
       clearAttachment();
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => [...prev.filter(item => String(item.id) !== String(msg.id)), msg]);
     } catch (err) {
       toast.error(err.message || (isAr ? 'تعذر الاتصال بالخادم.' : 'Could not reach the server.'));
     } finally {
+      sendingRef.current = false;
       setSending(false);
       inputRef.current?.focus();
     }

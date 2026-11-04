@@ -1,6 +1,6 @@
 import {
   BarChart3, LayoutDashboard, ClipboardList, Boxes, Layers,
-  FileText, Banknote, Receipt, MessageSquare, Users, Ruler, ClipboardCheck
+  FileText, Banknote, Receipt, MessageSquare, Users, Ruler, ClipboardCheck, History
 } from 'lucide-react';
 
 /**
@@ -132,6 +132,13 @@ export const SECTIONS = [
     subtitleKey: 'headerUsersSubtitle',
     roles: ['super_admin'],
     bottom: false,
+  },
+  {
+    id: 'admin-operations', group: 'admin', icon: History,
+    label: { ar: 'التدقيق والنسخ الاحتياطي', en: 'Audit & Backups' },
+    short: { ar: 'التدقيق', en: 'Audit' },
+    titleKey: 'headerOperationsTitle', subtitleKey: 'headerOperationsSubtitle',
+    roles: ['super_admin'], bottom: false,
   },
 ];
 

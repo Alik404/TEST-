@@ -11,13 +11,19 @@
     "build": "vite build",
     "start": "node server/index.js",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs",
+    "backup:restore": "node server/restore-backup.js",
+    "lint:app": "eslint src server",
+    "test:ui": "node tests/admin-ui.mjs",
+    "backup:export": "node server/export-backup.js",
+    "cloud:maintain": "node server/cloud-maintenance.js"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.108.2",
+    "@supabase/supabase-js": "2.108.2",
     "@vitejs/plugin-react": "^6.0.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -30,9 +36,12 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "axe-core": "^4.14.0",
     "concurrently": "^10.0.3",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",

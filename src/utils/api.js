@@ -6,9 +6,13 @@
  * an admin interface it no longer has the rights to use.
  */
 
+import { toast } from './toast';
+
 const TOKEN_KEY = 'project_token';
 const USER_KEY = 'project_user';
 const EMAIL_KEY = 'project_last_email';
+let memoryToken = null;
+let memoryUser = null;
 
 /**
  * "Remember me" keeps the session in localStorage, so it survives closing the
@@ -34,10 +38,12 @@ const readItem = (key) => {
   return null;
 };
 
-export const getToken = () => readItem(TOKEN_KEY);
+export const getToken = () => memoryToken || readItem(TOKEN_KEY);
 
 export const setSession = (user, token, remember = false) => {
   clearSession();
+  memoryToken = token;
+  memoryUser = user;
   try {
     const store = remember ? window.localStorage : window.sessionStorage;
     store.setItem(USER_KEY, JSON.stringify(user));
@@ -48,6 +54,8 @@ export const setSession = (user, token, remember = false) => {
 };
 
 export const clearSession = () => {
+  memoryToken = null;
+  memoryUser = null;
   for (const store of stores()) {
     try {
       store.removeItem(USER_KEY);
@@ -59,6 +67,7 @@ export const clearSession = () => {
 };
 
 export const getStoredUser = () => {
+  if (memoryUser) return memoryUser;
   try {
     const raw = readItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -93,8 +102,8 @@ export const setUnauthorizedHandler = (handler) => {
 
 /**
  * fetch() with the session token attached.
- * Same signature and return value as fetch, so call sites keep using res.ok /
- * res.json() exactly as before.
+ * Returns a Response on success. Failed mutations throw the server's message
+ * so existing callers cannot replace a storage failure with a generic error.
  */
 export const apiFetch = async (path, options = {}) => {
   const token = getToken();
@@ -109,6 +118,15 @@ export const apiFetch = async (path, options = {}) => {
 
   if (res.status === 401) {
     onUnauthorized();
+  }
+
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase());
+  if (mutation && !res.ok) {
+    throw new Error(await apiErrorMessage(res.clone(), 'تعذّر إكمال العملية. أعد المحاولة.'));
+  }
+  if (mutation && res.ok && res.headers.get('X-Storage-Mode') === 'local' && res.headers.get('Content-Type')?.includes('application/json')) {
+    const isAr = document.documentElement.lang !== 'en';
+    toast.info(isAr ? 'تم الحفظ محلياً على الخادم. التخزين السحابي غير مفعّل.' : 'Saved on this server. Cloud storage is not enabled.');
   }
 
   return res;
