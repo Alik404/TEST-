@@ -281,6 +281,98 @@ export async function renderNoteImage({ photo, number, level, typeLabel, date, t
   return toBlob(canvas, EXPORT.quality);
 }
 
+/**
+ * Cover image sent first for each level, so the level's images are easy to
+ * find in a WhatsApp or Viber chat: the level, how many notes and images
+ * follow, the date, and the note numbers. Same look as the note strip.
+ */
+export async function renderLevelCover({ level, noteCount, imageCount, date, numbers }) {
+  const { width: W, pad: P } = EXPORT;
+  const measure = document.createElement('canvas').getContext('2d');
+
+  // Note numbers, wrapped left to right under the counts.
+  const numSize = 38;
+  const numLineH = Math.round(numSize * 1.6);
+  measure.font = font(600, numSize);
+  let numberLines = wrapLines(measure, numbers.join('   '), W - P * 2);
+  if (numberLines.length > 8) {
+    numberLines = numberLines.slice(0, 8);
+    numberLines[7] = `${numberLines[7]} …`;
+  }
+
+  const titleY = EXPORT.rule + 110;
+  const levelY = titleY + 150;
+  const statsY = levelY + 170;
+  const dividerY = statsY + 110;
+  const numbersLabelY = dividerY + 70;
+  const firstNumY = numbersLabelY + 70;
+  const H = Math.max(W * 0.75, Math.ceil(firstNumY + (numberLines.length - 0.5) * numLineH + 70));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = EXPORT.navy;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = EXPORT.orange;
+  ctx.fillRect(0, 0, W, EXPORT.rule);
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+
+  ctx.direction = 'rtl';
+  ctx.fillStyle = EXPORT.label;
+  ctx.font = font(600, 44);
+  ctx.fillText('ملاحظات الاستلام — النزلة', W / 2, titleY);
+
+  // The level code in a badge, drawn left to right on its own.
+  ctx.direction = 'ltr';
+  const levelSize = fitFont(ctx, level, 700, 120, W - P * 4, 60);
+  const boxW = Math.min(W - P * 2, ctx.measureText(level).width + 120);
+  const boxH = levelSize + 70;
+  ctx.fillStyle = EXPORT.badge;
+  roundRect(ctx, (W - boxW) / 2, levelY - boxH / 2, boxW, boxH, 28);
+  ctx.fill();
+  ctx.fillStyle = EXPORT.navy;
+  ctx.font = font(700, levelSize);
+  ctx.fillText(level, W / 2, levelY + 4);
+
+  // Three figures, read right to left: notes, images, date.
+  const stats = [
+    { label: 'عدد الملاحظات', value: String(noteCount) },
+    { label: 'عدد الصور', value: String(imageCount) },
+    { label: 'التاريخ', value: date },
+  ];
+  const colW = (W - P * 2) / stats.length;
+  stats.forEach((s, i) => {
+    const cx = W - P - colW * (i + 0.5);
+    ctx.direction = 'rtl';
+    ctx.fillStyle = EXPORT.label;
+    ctx.font = font(600, 32);
+    ctx.fillText(s.label, cx, statsY - 34);
+    ctx.direction = 'ltr';
+    ctx.fillStyle = EXPORT.text;
+    fitFont(ctx, s.value, 700, 54, colW - 16, 28);
+    ctx.fillText(s.value, cx, statsY + 30);
+  });
+
+  ctx.fillStyle = EXPORT.divider;
+  ctx.fillRect(P, dividerY, W - P * 2, 2);
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = EXPORT.label;
+  ctx.font = font(600, 32);
+  ctx.fillText('أرقام الملاحظات', W - P, numbersLabelY);
+
+  ctx.direction = 'ltr';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = EXPORT.text;
+  ctx.font = font(600, numSize);
+  numberLines.forEach((line, i) => ctx.fillText(line, W / 2, firstNumY + i * numLineH));
+
+  return toBlob(canvas, EXPORT.quality);
+}
+
 /** Web Share with files is limited per call; larger sets go in batches. */
 export const SHARE_BATCH = 10;
 

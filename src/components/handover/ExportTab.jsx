@@ -4,13 +4,39 @@ import { EmptyState, Modal, ProgressBar } from '../ui';
 import { toast } from '../../utils/toast';
 import { noteType, noteText, dmy, sortNotes, exportFileName } from '../../utils/handover';
 import {
-  ensureExportFonts, loadPhoto, renderNoteImage, canShareFiles, shareFiles, downloadFiles, SHARE_BATCH,
+  ensureExportFonts, loadPhoto, renderNoteImage, renderLevelCover, canShareFiles, shareFiles, downloadFiles, SHARE_BATCH,
 } from '../../utils/handoverImages';
+import { readPref, writePref } from '../../utils/handover';
 
 const exportable = (note, includeDeferred) =>
   Boolean(note.number) && (note.status === 'approved' || (includeDeferred && note.status === 'deferred'));
 
 const chunk = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
+
+const ALL = '__all';
+const COVER_PREF = 'handover_export_cover';
+
+/** Cover file name, sorted before the level's notes: B37-00_cover.jpg. */
+const coverFileName = (level) => `${String(level).replace(/[^A-Za-z0-9-]/g, '') || 'level'}-00_cover.jpg`;
+
+/** Notes of the chosen levels, grouped in the order they were sorted. */
+const groupByLevel = (notes) => {
+  const map = new Map();
+  for (const n of notes) {
+    if (!map.has(n.level)) map.set(n.level, []);
+    map.get(n.level).push(n);
+  }
+  return [...map].map(([level, list]) => ({ level, notes: list }));
+};
+
+const groupItems = (items) => {
+  const map = new Map();
+  for (const item of items) {
+    if (!map.has(item.level)) map.set(item.level, []);
+    map.get(item.level).push(item);
+  }
+  return [...map].map(([level, list]) => ({ level, items: list }));
+};
 
 const asFile = (item) => new File([item.blob], item.name, { type: 'image/jpeg', lastModified: Date.now() });
 
@@ -18,6 +44,10 @@ const asFile = (item) => new File([item.blob], item.name, { type: 'image/jpeg', 
  * Turns approved notes into ready-to-send images: choose the levels (deferred
  * notes only when asked), build the images on this phone, check them in the
  * preview, then share to Viber/WhatsApp or save each one to the gallery.
+ *
+ * Images are prepared and sent level by level: each level can open with a
+ * cover image, has its own share and save buttons, and share batches never
+ * mix two levels, so every level lands in the chat as its own group.
  */
 export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
   const [excluded, setExcluded] = useState(() => new Set());
@@ -25,7 +55,9 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
   const [items, setItems] = useState([]);
   const [failed, setFailed] = useState([]);
   const [progress, setProgress] = useState(null);
-  const [shareIndex, setShareIndex] = useState(0);
+  // Next batch to share, per level (ALL = sharing every level in turn).
+  const [shareAt, setShareAt] = useState({});
+  const [withCover, setWithCover] = useState(() => readPref(COVER_PREF, '1') === '1');
   const [saving, setSaving] = useState(null);
   const [preview, setPreview] = useState(null);
 
@@ -38,7 +70,7 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
     items.forEach(i => URL.revokeObjectURL(i.url));
     setItems([]);
     setFailed([]);
-    setShareIndex(0);
+    setShareAt({});
   };
 
   const levelCounts = useMemo(() => {
@@ -56,7 +88,9 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
 
   const pickNotes = (list) => sortNotes(list.filter(n => exportable(n, includeDeferred) && !excluded.has(n.level)), levels);
   const chosenNotes = pickNotes(notes);
-  const imageTotal = chosenNotes.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0);
+  const chosenLevels = new Set(chosenNotes.map(n => n.level)).size;
+  const imageTotal = chosenNotes.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0)
+    + (withCover ? chosenLevels : 0);
 
   const toggleLevel = (level) => {
     clearItems();
@@ -82,41 +116,66 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
       }
       // Fresh signed links, and any note approved since the tab opened.
       const fresh = pickNotes(await refreshNotes());
-      const total = fresh.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0);
+      const levelGroups = groupByLevel(fresh);
+      const total = fresh.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0)
+        + (withCover ? levelGroups.length : 0);
       const built = [];
       const errors = [];
       let done = 0;
       setProgress({ done, total });
 
-      for (const note of fresh) {
-        const base = {
-          number: note.number,
-          level: note.level,
-          typeLabel: noteType(note.note_type).ar,
-          date: dmy(note.created_at),
-          text: noteText(note),
-        };
-        const photos = note.photos.length ? note.photos : [null];
-        for (let i = 0; i < photos.length; i += 1) {
-          const name = exportFileName(note.number, photos[i] ? i + 1 : 0);
+      for (const { level, notes: levelNotes } of levelGroups) {
+        if (withCover) {
+          const name = coverFileName(level);
           try {
-            const bitmap = photos[i] ? await loadPhoto(photos[i].url) : null;
-            const blob = await renderNoteImage({ ...base, photo: bitmap });
-            bitmap?.close?.();
-            built.push({ id: `${note.id}-${i}`, name, blob, url: URL.createObjectURL(blob), selected: true });
+            const blob = await renderLevelCover({
+              level,
+              noteCount: levelNotes.length,
+              imageCount: levelNotes.reduce((sum, n) => sum + Math.max(1, n.photos.length), 0),
+              date: dmy(new Date().toISOString()),
+              numbers: levelNotes.map(n => n.number),
+            });
+            built.push({ id: `cover-${level}`, level, cover: true, name, blob, url: URL.createObjectURL(blob), selected: true });
           } catch (err) {
-            console.error('Export image failed:', name, err);
+            console.error('Export cover failed:', name, err);
             errors.push(name);
           }
           done += 1;
           setProgress({ done, total });
+        }
+
+        for (const note of levelNotes) {
+          const base = {
+            number: note.number,
+            level: note.level,
+            typeLabel: noteType(note.note_type).ar,
+            date: dmy(note.created_at),
+            text: noteText(note),
+          };
+          const photos = note.photos.length ? note.photos : [null];
+          for (let i = 0; i < photos.length; i += 1) {
+            const name = exportFileName(note.number, photos[i] ? i + 1 : 0);
+            try {
+              const bitmap = photos[i] ? await loadPhoto(photos[i].url) : null;
+              const blob = await renderNoteImage({ ...base, photo: bitmap });
+              bitmap?.close?.();
+              built.push({ id: `${note.id}-${i}`, level, name, blob, url: URL.createObjectURL(blob), selected: true });
+            } catch (err) {
+              console.error('Export image failed:', name, err);
+              errors.push(name);
+            }
+            done += 1;
+            setProgress({ done, total });
+          }
         }
       }
 
       setItems(built);
       setFailed(errors);
       if (built.length) {
-        toast.success(isAr ? `جهزت ${built.length} صورة. راجعها ثم شاركها أو احفظها.` : `${built.length} images ready. Review, then share or save.`);
+        toast.success(isAr
+          ? `جهزت ${built.length} صورة لـ ${levelGroups.length} نزلة. شارك كل نزلة على حدة أو احفظها.`
+          : `${built.length} images ready for ${levelGroups.length} levels. Share or save each level on its own.`);
       }
     } catch (err) {
       toast.error(err.message || (isAr ? 'تعذر تجهيز الصور.' : 'Could not build the images.'));
@@ -126,17 +185,27 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
   };
 
   const chosen = items.filter(i => i.selected);
-  const batches = chunk(chosen, SHARE_BATCH);
-  const batch = batches[Math.min(shareIndex, Math.max(0, batches.length - 1))] || [];
+  const groups = groupItems(items);
+
+  // Batches never cross a level: sharing everything goes level by level.
+  const batchesFor = (key) => (key === ALL
+    ? groups.flatMap(g => chunk(g.items.filter(i => i.selected), SHARE_BATCH))
+    : chunk(items.filter(i => i.selected && i.level === key), SHARE_BATCH));
 
   const setSelected = (id, selected) => {
-    setShareIndex(0);
+    setShareAt({});
     setItems(prev => prev.map(i => (i.id === id ? { ...i, selected } : i)));
   };
 
-  const setAllSelected = (selected) => {
-    setShareIndex(0);
-    setItems(prev => prev.map(i => ({ ...i, selected })));
+  const setAllSelected = (selected, level) => {
+    setShareAt({});
+    setItems(prev => prev.map(i => (level === undefined || i.level === level ? { ...i, selected } : i)));
+  };
+
+  const toggleCover = (on) => {
+    clearItems();
+    setWithCover(on);
+    writePref(COVER_PREF, on ? '1' : '0');
   };
 
   const save = async (list) => {
@@ -149,22 +218,28 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
     }
   };
 
-  const share = async () => {
+  const share = async (key) => {
+    const batches = batchesFor(key);
+    const index = Math.min(shareAt[key] || 0, Math.max(0, batches.length - 1));
+    const batch = batches[index] || [];
     if (batch.length === 0) return;
     const files = batch.map(asFile);
     if (!canShareFiles(files)) {
       toast.info(isAr ? 'المشاركة المباشرة غير مدعومة بهذا المتصفح، فراح تنحفظ الصور بدلها.' : 'Sharing is not supported here, so the images are saved instead.');
-      await save(chosen);
+      await save(batches.flat());
       return;
     }
+    const where = key === ALL ? '' : (isAr ? ` للنزلة ${key}` : ` for ${key}`);
     try {
       await shareFiles(files);
-      if (shareIndex + 1 < batches.length) {
-        setShareIndex(shareIndex + 1);
-        toast.info(isAr ? `أُرسلت الدفعة ${shareIndex + 1}. اضغط «مشاركة» للدفعة التالية.` : `Batch ${shareIndex + 1} sent. Tap Share for the next one.`);
+      if (index + 1 < batches.length) {
+        setShareAt(prev => ({ ...prev, [key]: index + 1 }));
+        toast.info(isAr
+          ? `أُرسلت الدفعة ${index + 1}${where}. اضغط «مشاركة» للدفعة التالية.`
+          : `Batch ${index + 1}${where} sent. Tap Share for the next one.`);
       } else {
-        setShareIndex(0);
-        toast.success(isAr ? 'تمت مشاركة كل الصور المختارة.' : 'All selected images shared.');
+        setShareAt(prev => ({ ...prev, [key]: 0 }));
+        toast.success(isAr ? `تمت مشاركة كل الصور المختارة${where}.` : `All selected images${where} shared.`);
       }
     } catch (err) {
       if (err?.name === 'AbortError') return;
@@ -185,9 +260,13 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
   }
 
   const busy = Boolean(progress || saving);
-  const shareLabel = batches.length > 1
-    ? (isAr ? `مشاركة الدفعة ${shareIndex + 1} من ${batches.length}` : `Share batch ${shareIndex + 1} of ${batches.length}`)
-    : (isAr ? 'مشاركة' : 'Share');
+  const shareLabel = (key, base) => {
+    const count = batchesFor(key).length;
+    const index = Math.min(shareAt[key] || 0, Math.max(0, count - 1));
+    return count > 1
+      ? (isAr ? `${base} (دفعة ${index + 1} من ${count})` : `${base} (batch ${index + 1} of ${count})`)
+      : base;
+  };
 
   return (
     <div className="stack">
@@ -225,7 +304,21 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
             <span className="muted text-xs num" dir="ltr">B37-D01</span>
           </label>
 
+          <label className="ho-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={withCover}
+              onChange={(e) => toggleCover(e.target.checked)}
+              disabled={busy}
+            />
+            <span className="ho-switch-track" aria-hidden="true" />
+            <span>{isAr ? 'صورة غلاف لكل نزلة' : 'Cover image per level'}</span>
+          </label>
+
           <p className="muted text-sm">
+            <span className="num">{chosenLevels}</span> {isAr ? 'نزلة' : 'levels'}
+            {' · '}
             <span className="num">{chosenNotes.length}</span> {isAr ? 'ملاحظة' : 'notes'}
             {' · '}
             <span className="num">{imageTotal}</span> {isAr ? 'صورة' : 'images'}
@@ -261,7 +354,9 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
             <div>
               <h2 className="card-title" id="ho-pv-title">{isAr ? 'معاينة قبل الإرسال' : 'Preview before sending'}</h2>
               <p className="card-subtitle">
-                {isAr ? `مختارة ${chosen.length} من ${items.length}. اضغط الصورة لعرضها كاملة.` : `${chosen.length} of ${items.length} selected. Tap an image to see it full size.`}
+                {isAr
+                  ? `مختارة ${chosen.length} من ${items.length}. شارك كل نزلة على حدة من زرها، واضغط الصورة لعرضها كاملة.`
+                  : `${chosen.length} of ${items.length} selected. Share each level from its own button; tap an image to see it full size.`}
               </p>
             </div>
             <div className="btn-row">
@@ -270,19 +365,48 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
             </div>
           </header>
           <div className="card-body stack">
-            <ul className="ho-export-grid">
-              {items.map(item => (
-                <li key={item.id} className="ho-export-item" data-selected={item.selected}>
-                  <button type="button" className="ho-export-thumb" onClick={() => setPreview(item)} aria-label={`${isAr ? 'عرض' : 'View'} ${item.name}`}>
-                    <img src={item.url} alt="" />
-                  </button>
-                  <label className="ho-export-check">
-                    <input type="checkbox" checked={item.selected} onChange={(e) => setSelected(item.id, e.target.checked)} />
-                    <span dir="ltr" className="num">{item.name}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
+            {groups.map(group => {
+              const picked = group.items.filter(i => i.selected);
+              const allPicked = picked.length === group.items.length;
+              return (
+                <section key={group.level} className="ho-export-level" aria-labelledby={`ho-lv-${group.level}`}>
+                  <header className="ho-export-level-head">
+                    <h3 id={`ho-lv-${group.level}`}>
+                      {isAr ? 'النزلة' : 'Level'} <span dir="ltr" className="num">{group.level}</span>
+                      <span className="chip-count num">{picked.length}/{group.items.length}</span>
+                    </h3>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAllSelected(!allPicked, group.level)} disabled={busy}>
+                      {allPicked ? (isAr ? 'إلغاء التحديد' : 'Clear') : (isAr ? 'تحديد الكل' : 'Select all')}
+                    </button>
+                  </header>
+
+                  <ul className="ho-export-grid">
+                    {group.items.map(item => (
+                      <li key={item.id} className="ho-export-item" data-selected={item.selected}>
+                        <button type="button" className="ho-export-thumb" onClick={() => setPreview(item)} aria-label={`${isAr ? 'عرض' : 'View'} ${item.name}`}>
+                          <img src={item.url} alt="" />
+                        </button>
+                        <label className="ho-export-check">
+                          <input type="checkbox" checked={item.selected} onChange={(e) => setSelected(item.id, e.target.checked)} />
+                          <span dir="ltr" className="num">{item.cover ? (isAr ? 'غلاف' : 'Cover') : item.name}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="ho-export-actions">
+                    <button type="button" className="btn btn--primary" onClick={() => share(group.level)} disabled={picked.length === 0 || busy}>
+                      <Share2 size={18} aria-hidden="true" />
+                      {shareLabel(group.level, isAr ? `مشاركة ${group.level}` : `Share ${group.level}`)}
+                    </button>
+                    <button type="button" className="btn btn--secondary" onClick={() => save(picked)} disabled={picked.length === 0 || busy}>
+                      <Download size={18} aria-hidden="true" />
+                      {isAr ? `حفظ ${group.level}` : `Save ${group.level}`}
+                    </button>
+                  </div>
+                </section>
+              );
+            })}
 
             {saving && (
               <div role="status" aria-live="polite" className="text-sm">
@@ -290,20 +414,22 @@ export default function ExportTab({ notes, levels, isAr, refreshNotes }) {
               </div>
             )}
 
-            <div className="ho-export-actions">
-              <button type="button" className="btn btn--primary ho-btn-lg" onClick={share} disabled={chosen.length === 0 || busy}>
-                <Share2 size={20} aria-hidden="true" />
-                {shareLabel}
-              </button>
-              <button type="button" className="btn btn--secondary ho-btn-lg" onClick={() => save(chosen)} disabled={chosen.length === 0 || busy}>
-                <Download size={20} aria-hidden="true" />
-                {isAr ? 'حفظ الصور' : 'Save images'}
-              </button>
-            </div>
+            {groups.length > 1 && (
+              <div className="ho-export-actions ho-export-actions--all">
+                <button type="button" className="btn btn--secondary ho-btn-lg" onClick={() => share(ALL)} disabled={chosen.length === 0 || busy}>
+                  <Share2 size={20} aria-hidden="true" />
+                  {shareLabel(ALL, isAr ? 'مشاركة كل النزلات' : 'Share all levels')}
+                </button>
+                <button type="button" className="btn btn--secondary ho-btn-lg" onClick={() => save(chosen)} disabled={chosen.length === 0 || busy}>
+                  <Download size={20} aria-hidden="true" />
+                  {isAr ? 'حفظ كل الصور' : 'Save all images'}
+                </button>
+              </div>
+            )}
             <p className="muted text-xs">
               {isAr
-                ? `المشاركة ترسل ${SHARE_BATCH} صور كحد أقصى بكل مرة. عند الحفظ، إذا سألك المتصفح عن تنزيل عدة ملفات اختر «السماح».`
-                : `Sharing sends up to ${SHARE_BATCH} images at a time. When saving, allow multiple downloads if the browser asks.`}
+                ? `كل نزلة تُرسل لوحدها، ${SHARE_BATCH} صور كحد أقصى بكل مرة، ولا تختلط صور نزلتين بنفس الدفعة. عند الحفظ، إذا سألك المتصفح عن تنزيل عدة ملفات اختر «السماح».`
+                : `Each level is sent on its own, up to ${SHARE_BATCH} images at a time, and a batch never mixes two levels. When saving, allow multiple downloads if the browser asks.`}
             </p>
           </div>
         </section>
